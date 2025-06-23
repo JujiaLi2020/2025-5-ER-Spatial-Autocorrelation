@@ -1,0 +1,19 @@
+6/23/2025 Updata
+
+Enabled Free Y-Axis Scaling by County
+Adjusted county-level plots to use scales = "free_y" in facet_wrap(), allowing more accurate visual comparisons across counties with different case magnitudes.
+
+Plotted Monthly ER Opioid Visits for Target Counties with Increasing Trends
+Identified and visualized counties showing upward trends in monthly ER opioid visits (e.g., Jefferson, Lauderdale, Franklin), using point-line plots with linear regression overlays.
+
+Separated Drug Consumption into Independent Plots
+Disaggregated total opioid metrics by drug type (Oxycodone, Hydrocodone, Buprenorphine, Methadone) and created individual plots to observe drug-specific temporal patterns across counties.
+
+Terminology Updated: “West” Changed to “Northwest”
+Revised region labeling in all relevant figures and context descriptions to more accurately reflect the geographic scope (i.e., “Northwest Alabama” instead of “West Alabama”).
+
+Plotted Monthly Drug Consumption for Selected Counties with Increasing Trends
+Created focused plots showing rising trends in opioid drug consumption for specific counties (e.g., Colbert, Etowah), helping to highlight regional variation by substance.
+
+Initial Observations and Interpretation Added
+Preliminary results indicate persistent or intensifying ER opioid visit trends in several counties (e.g., Franklin, Lauderdale), with notable increases in Hydrocodone and Buprenorphine use. These patterns suggest geographically and pharmacologically targeted intervention may be warranted.
