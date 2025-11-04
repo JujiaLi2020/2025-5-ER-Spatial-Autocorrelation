@@ -1,0 +1,5 @@
+Model ID,Spatial Field,Spatiotemporal Field,df,AIC,ΔAIC
+M2,No,AR(1),5,31507.38,0
+M4,Yes,AR(1),6,31509.38,2
+M3,Yes,No,4,32143.78,636.39
+M1,No,No,2,40684.44,9177.06
