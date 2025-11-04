@@ -3,9 +3,7 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-## 1. Preparation
-### 1.1 Setup
-
+### Packages
 ```{r echo=FALSE}
 library(dplyr)
 library(tidyr)
@@ -27,9 +25,12 @@ library(purrr)
 library(DT) # Manipulatable HTML table
 ```
 
+## 1.[Skip] Preparation
+All datasets have been merged into "ER_DRUG_DEATH_ACS.csv". Jump to "2. Clean and Standardize".
+
 ### 1.2 Data Preparation
 ```{r , message=FALSE, warning=FALSE}
-file_path <- "Data/ER_opioid_2016_2019_cleaned.csv"
+file_path <- "../Data/ER_opioid_2016_2019_cleaned.csv"
 if (!file.exists(file_path)) {
   stop("File not found: Data/ER_opioid_2016_2019_cleaned.csv")
 }
@@ -50,7 +51,7 @@ er_data <- er_data |>
 
 
 # Read Data_ARCOS and clean for next process
-Data_ARCOS <- read_csv("Data/ARCOS_AL_2016_2019_cleaned.csv")
+Data_ARCOS <- read_csv("../BigData/ARCOS_AL_2016_2019_cleaned.csv")
 
 Data_ARCOS_filted <- Data_ARCOS%>%
   filter(drug %in% c("OXYCODONE", "HYDROCODONE", "BUPRENORPHINE", "METHADONE"))%>%
@@ -131,7 +132,7 @@ df_er_drug_annual <- df_er_drug %>%
 
 ### 1.4 CDC Opioid-related Mortality Read and Prepare 
 ```{r, message=FALSE, warning=FALSE}
-mortality <- read_csv("Data/CDCWonder Opioid Related Mortality AL 2016-2019.csv")
+mortality <- read_csv("../Data/CDCWonder Opioid Related Mortality AL 2016-2019.csv")
 
 mortality_filted <- mortality%>%
   mutate(County = toupper(gsub(" County, AL", "", County)))%>%
@@ -164,7 +165,7 @@ df_er_drug_mortality <- left_join(
 
 ### 1.5 ACS Data Read and Prepare 
 ```{r , message=FALSE, warning=FALSE}
-acs <- read_csv("Data/ACS 2019 Data Subset.csv")
+acs <- read_csv("../Data/ACS 2019 Data Subset.csv")
 
 # 1) Build a safe, readable column name from Concept + Label
 clean_colname <- function(concept, label) {
@@ -245,13 +246,16 @@ df_er_drug_mortality_acs <- df_er_drug_mortality_acs%>%
     noinsurance_per100k = noinsurance_rate * 1e5)
 
 
-write.csv(df_er_drug_mortality_acs, "Data/ER_DRUG_DEATH_ACS.csv")
+write.csv(df_er_drug_mortality_acs, "../Data/ER_DRUG_DEATH_ACS.csv")
 ```
 In the CDC mortality dataset, only annual data points are available. To address suppressed death counts, we applied *mice* imputation. However, in the spatiotemporal model only 45 of 88 observations passed due to missing values. Among the remaining 44 observations, 21 were recorded as zero.
 
 ## 2. Clean and Standardize Data
 ### 2.1 Select Predictors
 ```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+# Read merged data
+df_er_drug_mortality_acs <- read.csv("../Data/ER_DRUG_DEATH_ACS.csv")
+
 df_select <- df_er_drug_mortality_acs%>%
   select(
     County,
