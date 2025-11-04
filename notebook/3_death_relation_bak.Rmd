@@ -1,0 +1,1643 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## 1. Preparation
+### 1.1 Setup
+
+```{r echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(readr)
+library(ggplot2)
+library(lubridate)
+library(stringr)
+library(janitor)
+library(GGally)
+# Spatial + modeling
+library(sf)
+library(tigris)
+options(tigris_use_cache = TRUE)
+library(sdmTMB)
+library(DHARMa)
+
+library(purrr)
+```
+
+### 1.2 Data Preparation
+```{r , message=FALSE, warning=FALSE}
+file_path <- "Data/ER_opioid_2016_2019_cleaned.csv"
+if (!file.exists(file_path)) {
+  stop("File not found: Data/ER_opioid_2016_2019_cleaned.csv")
+}
+er_data <- read_csv(file_path, show_col_types = FALSE)
+
+# Keep a subset of North / Central AL (as in your script)
+keep_cnty <- toupper(c(
+  "Lauderdale","Limestone","Madison","Jackson","Colbert","Franklin",
+  "Lawrence","Morgan","Marshall","Dekalb","Marion","Winston",
+  "Cullman","Blount","Etowah","Cherokee","Lamar","Fayette",
+  "Walker","Jefferson","St. Clair","Pickens","Tuscaloosa","Shelby"
+))
+
+er_data <- er_data |>
+  mutate(County = toupper(County),
+         Date = as.Date(Date)) |>
+  filter(County %in% keep_cnty)
+
+
+# Read Data_ARCOS and clean for next process
+Data_ARCOS <- read_csv("Data/ARCOS_AL_2016_2019_cleaned.csv")
+
+Data_ARCOS_filted <- Data_ARCOS%>%
+  filter(drug %in% c("OXYCODONE", "HYDROCODONE", "BUPRENORPHINE", "METHADONE"))%>%
+  filter(county %in% toupper(c(
+    "Lauderdale", "Limestone", "Madison", "Jackson", "Colbert", "Franklin",
+    "Lawrence", "Morgan", "Marshall", "Dekalb", "Marion", "Winston",
+    "Cullman", "Blount", "Etowah", "Cherokee", "Lamar", "Fayette",
+    "Walker", "Jefferson", "St. Clair", "Pickens", "Tuscaloosa", "Shelby"
+  ))
+  )%>%
+  #mutate(mme = mme/1000000)%>%
+  mutate(Date = mdy(date))%>%
+  mutate(County = toupper(county))
+
+arcos_wide_mme <- Data_ARCOS_filted %>%
+  pivot_wider(
+    id_cols    = c(County, Date),
+    names_from = drug,
+    values_from= mme,
+    values_fill = 0
+  )
+
+df_er_drug <- left_join(
+  er_data,
+  arcos_wide_mme,
+  by = c("County", "Date")
+)
+
+
+```
+
+
+### 1.3 Annually aggregation + covariates
+
+```{r, message=FALSE, warning=FALSE}
+# Presence at daily level
+df_er_drug <- df_er_drug |>
+  mutate(
+    year = year(Date),
+    presence = if_else(Count > 0, 1L, 0L)
+  )
+
+# Aggregate to county × year
+df_er_drug_annual <- df_er_drug %>%
+  group_by(County, year) %>%
+  summarise(
+    # population for the year (choose one: mean/first/median)
+    pop_year = first(pop),
+
+    # ER annual
+    ER_annual = sum(Count, na.rm = TRUE),
+
+    # Drug annual
+    OXYCODONE_annual     = sum(OXYCODONE,     na.rm = TRUE),
+    HYDROCODONE_annual   = sum(HYDROCODONE,   na.rm = TRUE),
+    BUPRENORPHINE_annual = sum(BUPRENORPHINE, na.rm = TRUE),
+    METHADONE_annual     = sum(METHADONE,     na.rm = TRUE),
+
+    presence = as.integer(sum(Count, na.rm = TRUE) > 0),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # per-capita (proportion) and per 100k (common epidemiology scale)
+    ER_annual_percapita           = ER_annual / pop_year,
+    ER_annual_per100k             = ER_annual_percapita * 1e5,
+
+    OXYCODONE_annual_percapita    = OXYCODONE_annual     / pop_year,
+    OXYCODONE_annual_per100k      = OXYCODONE_annual_percapita * 1e5,
+
+    HYDROCODONE_annual_percapita  = HYDROCODONE_annual   / pop_year,
+    HYDROCODONE_annual_per100k    = HYDROCODONE_annual_percapita * 1e5,
+
+    BUPRENORPHINE_annual_percapita = BUPRENORPHINE_annual / pop_year,
+    BUPRENORPHINE_annual_per100k   = BUPRENORPHINE_annual_percapita * 1e5,
+
+    METHADONE_annual_percapita    = METHADONE_annual     / pop_year,
+    METHADONE_annual_per100k      = METHADONE_annual_percapita * 1e5
+  )
+  
+  
+```
+
+## 2.Read and Prepare CDC Opioid-related Mortality
+```{r, message=FALSE, warning=FALSE}
+mortality <- read_csv("Data/CDCWonder Opioid Related Mortality AL 2016-2019.csv")
+
+mortality_filted <- mortality%>%
+  mutate(County = toupper(gsub(" County, AL", "", County)))%>%
+  filter(County %in% toupper(c(
+    "Lauderdale", "Limestone", "Madison", "Jackson", "Colbert", "Franklin",
+    "Lawrence", "Morgan", "Marshall", "Dekalb", "Marion", "Winston",
+    "Cullman", "Blount", "Etowah", "Cherokee", "Lamar", "Fayette",
+    "Walker", "Jefferson", "St. Clair", "Pickens", "Tuscaloosa", "Shelby"
+  )))%>%
+  mutate(
+    Deaths = suppressWarnings(as.numeric(Deaths)),      # "Suppressed" → NA
+    CrudeRate = suppressWarnings(as.numeric(CrudeRate)),
+    deaths_per100k = Deaths / Population * 1e5
+  )%>%
+  rename(year = Year,
+         pop_CDC=Population)
+
+
+
+```
+### 2.1 [new]Imputation of Death
+
+```{r}
+#Impute missing Deaths with 5
+mortality_filted_imputated <- mortality_filted %>%
+  mutate(Deaths_5 = ifelse(is.na(Deaths), 5, Deaths),
+         Deaths_1 = ifelse(is.na(Deaths), 1, Deaths),
+         Deaths_9 = ifelse(is.na(Deaths), 9, Deaths)
+         )
+
+# No imputation
+# mortality_filted_imputated <- mortality_filted
+
+
+```
+
+Imputing all suppressed deaths as a fixed value (5 for 1–9) can easily dampen or distort the spatial–temporal signal.
+
+Why this can wash out spatiotemporal effects
+
+Attenuation of variance: Replacing a whole range (1–9) with a single number shrinks true variability across counties/years. Less variance ⇒ weaker evidence for spatial or temporal structure.
+
+Systematic bias: Suppression is not random (it occurs at low counts). Mid-point imputation pulls low-count areas toward the same value, making neighboring differences look smaller and weakening spatial gradients.
+
+Few years (2016–2019): With only 4 time points, any variance compression makes AR(1)/IID effects even harder to estimate.
+
+Per-capita scaling: If denominators vary a lot, a flat imputation in counts translates into uneven bias in rates, further masking structure.
+
+
+What to do (quick, practical sensitivity checks)
+
+1.Bracketing analysis (deterministic):
+
+Refit with all suppressed set to 1 (lower bound) and to 9 (upper bound).
+
+Compare AIC, σ_ST, and (if AR1) ρ across the three datasets (1, 5, 9). If σ_ST/ρ jump under 1 or 9, your ST result is sensitive to the imputation.
+
+2.Multiple imputation (simple, nonparametric):
+
+For each suppressed cell, draw a uniform integer 1–9; do this M times, fit the model to each, and pool σ_ST (and ρ).
+
+3.Model-based imputation (better):
+
+Fit a preliminary NB1 model without ST, predict μ̂, then for suppressed cells draw y ~ Truncated-NB(μ̂, θ; 1..9). Repeat M times and refit the full ST model. This respects your outcome distribution.
+
+4.Interval-likelihood (best, Bayesian or custom):
+
+Treat suppressed values as interval-censored counts (P(1≤Y≤9)). A Bayesian Poisson/NB BYM2/INLA model can incorporate this directly; in sdmTMB, you’d need custom likelihood.
+
+
+
+### 2.2 Merge
+
+```{r}
+df_er_drug_mortality <- left_join(
+  df_er_drug_annual,
+  mortality_filted_imputated,
+  by = c("County", "year")
+)
+
+
+```
+
+
+
+## 3.Read and Prepare ACS Data
+```{r , message=FALSE, warning=FALSE}
+acs <- read_csv("Data/ACS 2019 Data Subset.csv")
+
+# 1) Build a safe, readable column name from Concept + Label
+clean_colname <- function(concept, label) {
+  # drop leading "Estimate!!"
+  label2 <- str_remove(label, "^Estimate!!")
+  # collapse "!!" / ":" and other punctuation to separators
+  label2 <- str_replace_all(label2, "!!", "_")
+  label2 <- str_replace_all(label2, "[:;,-]+", "")
+  # build combined name, then snake case + de-duplicate
+  nm <- paste(concept, label2, sep = "__")
+  # nm <- janitor::make_clean_names(nm)
+  nm
+}
+
+acs2 <- acs %>%
+  mutate(
+    colname = clean_colname(Concept, Label)
+  )
+
+# 2) If there are duplicates per (State, County, Full_FIPS, colname), choose the first non-NA
+acs_collapsed <- acs2 %>%
+  group_by(State, County, Full_FIPS, colname) %>%
+  summarise(Value = dplyr::first(na.omit(Value)), .groups = "drop")
+
+
+# 3) Pivot to wide
+acs_wide <- acs_collapsed %>%
+  pivot_wider(
+    id_cols    = c(State, County, Full_FIPS),
+    names_from = colname,
+    values_from = Value,
+    values_fill = NA_real_
+  ) %>%
+  clean_names()%>%
+  mutate(CountyCode = full_fips)# final pass to ensure valid names
+
+# Merge three imputated mortality
+df_er_drug_mortality_acs_imputated <- left_join(
+  df_er_drug_mortality,
+  acs_wide,
+  by = c("CountyCode")
+  )
+#summary(mortality_filted)
+
+
+```
+
+
+
+```{r , message=FALSE, warning=FALSE}
+df_er_drug_mortality_acs_imputated <- df_er_drug_mortality_acs_imputated%>%
+  mutate(
+    unemployee_rate = employment_status_for_the_population_16_years_and_over_total_in_labor_force_civilian_labor_force_unemployed/employment_status_for_the_population_16_years_and_over_total_in_labor_force_civilian_labor_force,
+    
+    gini_index = gini_index_of_income_inequality_gini_index,
+         
+    median_income = median_household_income_in_the_past_12_months_in_2021_inflation_adjusted_dollars_median_household_income_in_the_past_12_months_in_2021_inflationadjusted_dollars,
+    
+    poverty_rate = poverty_status_in_the_past_12_months_by_sex_by_age_total_income_in_the_past_12_months_below_poverty_level/poverty_status_in_the_past_12_months_by_sex_by_age_total,
+
+    # sum all columns about disability
+    disability = rowSums(
+      across(starts_with("sex_by_age_by_disability"),
+             ~ as.numeric(.x)),           # ensure numeric
+      na.rm = TRUE),
+    # (optional) per-capita / per-100k versions
+    disability_rate      = disability / total_population_total,
+    disability_per100k   = disability_rate * 1e5,
+    
+    # sum all columns about noinsurance
+    noinsurance = rowSums(
+      across(starts_with("types_of_health_insurance_coverage"),
+             ~ replace_na(as.numeric(.x), 0)),
+      na.rm = TRUE
+    ),
+    # Optional: per-capita or per-100k version
+    noinsurance_rate    = noinsurance / total_population_total,
+    noinsurance_per100k = noinsurance_rate * 1e5)
+
+
+write.csv(df_er_drug_mortality_acs_imputated, "Data/ER_DRUG_DEATH_ACS.csv")
+```
+In the CDC mortality dataset, only annual data points are available. To address suppressed death counts, we applied *mice* imputation. However, in the spatiotemporal model only 45 of 88 observations passed due to missing values. Among the remaining 44 observations, 21 were recorded as zero.
+
+### 3.1 Select Predictors
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+df_select <- df_er_drug_mortality_acs_imputated%>%
+  select(
+    County,
+    year,
+    pop_CDC,
+    # Deaths
+    Deaths_5,
+    # ER visit
+    ER_annual_percapita,
+    # Drugs
+    OXYCODONE_annual_percapita,	HYDROCODONE_annual_percapita,	BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
+
+    # ACS
+    unemployee_rate,	gini_index,	poverty_rate,	disability_rate, noinsurance_rate
+    )
+
+```
+
+### 3.2 Data Standardization
+```{r}
+scale_vars <-  c(
+    # Deaths
+    "Deaths",
+    # ER visit
+    "ER_annual_percapita",
+    # Drugs
+    "OXYCODONE_annual_percapita",	"HYDROCODONE_annual_percapita",	"BUPRENORPHINE_annual_percapita", "METHADONE_annual_percapita",
+
+    # ACS
+    "unemployee_rate",	"gini_index",	"poverty_rate",	"disability_rate", "noinsurance_rate"
+    )
+
+df_select_z <- df_select %>%
+  mutate(Deaths= Deaths_5 / pop_CDC)%>%
+  mutate(across(all_of(scale_vars), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
+
+
+df_select_z_cor <- df_select_z %>%
+  select(-c("County","year","pop_CDC"))%>%
+  select(-all_of(scale_vars)) 
+```
+
+## 4. Correlation of Predictors
+```{r}
+p_heat <- ggcorr(
+  df_select_z_cor,
+  method = c("pairwise.complete.obs", "pearson"),
+  label = TRUE, label_size = 3, hjust = 0.9, layout.exp = 1
+) + theme_minimal(base_size = 10)
+print(p_heat)
+
+```
+```{r , message=FALSE, warning=FALSE}
+p_pairs <- ggpairs(
+  df_select_z_cor,
+  upper = list(continuous = wrap("cor", use = "pairwise.complete.obs", size = 3)),
+  lower = list(continuous = wrap("points", alpha = 0.4, size = 0.7)),
+  diag  = list(continuous = wrap("densityDiag", alpha = 0.6))
+) +
+  theme(
+    axis.text  = element_text(size = 7),
+    strip.text = element_text(size = 8)
+  )
+
+print(p_pairs)
+```
+### 4.1 ER Visit and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_select_z, aes(ER_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "ER visits", y = "Deaths")
+
+```
+### 4.2 Oxycodone and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_select_z, aes(OXYCODONE_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "OXYCODONE consumption", y = "Deaths")
+
+```
+### 4.3 Hydrocodone Visit and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_select_z, aes(HYDROCODONE_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "HYDROCODONE consumption", y = "Deaths")
+```
+### 4.4 Buprenorphine and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_select_z, aes(BUPRENORPHINE_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "BUPRENORPHINE consumption", y = "Deaths")
+```
+### 4.5 Methadone and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_select_z, aes(METHADONE_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "METHADONE consumption", y = "Deaths")
+```
+
+### 4.6 Gini Index and Deaths
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_select_z, aes(gini_index_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Gini Index", y = "Deaths")
+```
+### 4.7 Disability and Deaths
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_select_z, aes(disability_rate_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Disability", y = "Deaths")
+```
+
+
+## 5. Spatiotemporal Model
+
+### 5.1 County geometry & coordinates
+```{r}
+# AL counties in UTM 16N (meters), then convert to km numeric coords
+counties_sf <- tigris::counties(state = "AL", cb = TRUE, year = 2023) |>
+  st_transform(26916) |>
+  mutate(County = toupper(NAME))
+
+coords_m  <- st_coordinates(st_centroid(st_geometry(counties_sf)))
+county_xy <- counties_sf |>
+  st_drop_geometry() |>
+  transmute(
+    County,
+    X = coords_m[, "X"] / 1000,  # km
+    Y = coords_m[, "Y"] / 1000
+  )
+
+# Merge coords into model frame
+df <- df_select_z |>
+  left_join(county_xy, by = "County") |>
+  filter(is.finite(X), is.finite(Y), is.finite(pop_CDC))%>%
+  mutate(time_index = match(year, sort(unique(year))),
+         log_pop    = log(pop_CDC))
+```
+
+#### 5.1.1 Mesh
+```{r}
+### Mesh (built on the data actually modeled)
+# Cutoff ~ 10% of X-range in km (tune if too coarse/fine)
+mesh <- make_mesh(
+  df,
+  xy_cols = c("X","Y"),
+  cutoff = diff(range(df$X, na.rm = TRUE)) / 10
+)
+
+```
+
+
+### 5.2 Inspect and prune collinearity
+```{r}
+scale_vars_Z <-  c(
+    # Deaths
+    "Deaths",
+    # ER visit
+    "ER_annual_percapita_z",
+    # Drugs
+    "OXYCODONE_annual_percapita_z",	"HYDROCODONE_annual_percapita_z",	"BUPRENORPHINE_annual_percapita_z", "METHADONE_annual_percapita_z",
+
+    # ACS
+    "unemployee_rate_z",	"gini_index_z",	"poverty_rate_z",	"disability_rate_z", "noinsurance_rate_z"
+    )
+
+# Compute to_drop / to_keep from the matrix (|r| > 0.85)
+cor_mat <- cor(df_select_z_cor, use = "pairwise.complete.obs")
+#print(round(cor_mat, 2))
+
+high_pairs <- which(abs(cor_mat) > 0.85 & upper.tri(cor_mat), arr.ind = TRUE)
+to_drop <- unique(colnames(cor_mat)[high_pairs[, 2]])
+to_keep <- setdiff(colnames(cor_mat), to_drop)
+
+to_drop
+
+```
+
+
+```{r}
+to_keep
+to_keep <- to_keep[-1]
+to_keep
+```
+
+### 5.3 Create Formula
+
+```{r}
+# Optional extras you want always included:
+always <- c()                 # e.g., c("year_c") or c("ACS_PC1","ACS_PC2")
+rhs <- paste(c(always, to_keep), collapse = " + ")
+form <- as.formula(paste("Deaths ~", rhs))
+form
+```
+
+### [New] 5.4 Model Comparison and Curvature Testing
+
+```{r}
+# ---------- helper: fit with warning capture ----------
+fit_with_warnings <- function(expr) {
+  warns <- character(0)
+  res <- withCallingHandlers(
+    try(expr, silent = TRUE),
+    warning = function(w) {
+      warns <<- c(warns, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(result = res, warnings = warns)
+}
+
+# ---------- grids ----------
+families <- list(
+  NB1 = nbinom1(link = "log"),
+  NB2 = nbinom2(link = "log"),
+  Poisson = poisson(link = "log")
+)
+spatial_opts <- c("off","on")
+st_opts      <- c("off","iid","ar1")
+
+fits <- list()
+rows <- list()
+i <- 1
+
+for (fam_name in names(families)) {
+  fam <- families[[fam_name]]
+  for (sp in spatial_opts) {
+    for (st in st_opts) {
+
+      time_arg <- if (st == "off") NULL else "time_index"
+      model_name <- sprintf("%s_sp%s_%s", fam_name, toupper(sp), toupper(st))
+      cat("Fitting:", model_name, "\n")
+
+      res <- fit_with_warnings(
+        sdmTMB(
+          formula = form,
+          data = df,
+          mesh = mesh,
+          family = fam,
+          spatial = sp,
+          spatiotemporal = st,
+          time = time_arg,
+          offset = df$log_pop,
+          control = sdmTMBcontrol(newton_loops = 3)
+        )
+      )
+
+      if (!inherits(res$result, "try-error")) {
+        fit_i <- res$result
+        fits[[model_name]] <- fit_i
+
+        # --- diagnostics ---
+        pd <- tryCatch(isTRUE(fit_i$sd_report$pdHess), error = function(e) NA)
+        grad_max <- tryCatch(max(abs(fit_i$sd_report$gradient.fixed), na.rm = TRUE), error = function(e) NA_real_)
+        warn_txt <- paste(unique(res$warnings), collapse = " | ")
+        warn_hessian <- grepl("Hessian", warn_txt, ignore.case = TRUE)
+        warn_nan     <- grepl("NaN", warn_txt, ignore.case = TRUE)
+
+        rows[[i]] <- tibble(
+          model = model_name,
+          family = fam_name,
+          spatial = sp,
+          spatiotemporal = st,
+          AIC = AIC(fit_i),
+          logLik = as.numeric(logLik(fit_i)),
+          npar = attr(logLik(fit_i), "df"),
+          # --- Hessian & convergence flags to record ---
+          hessian_pd = pd,                    # TRUE/FALSE/NA
+          grad_max = grad_max,                # size of gradient
+          converged_strict = isTRUE(pd) && is.finite(grad_max) && grad_max < 1e-3,
+          n_warnings = length(res$warnings),
+          warn_hessian = warn_hessian,
+          warn_nan = warn_nan,
+          first_warning = if (length(res$warnings)) res$warnings[[1]] else NA_character_
+        )
+      } else {
+        rows[[i]] <- tibble(
+          model = model_name,
+          family = fam_name,
+          spatial = sp,
+          spatiotemporal = st,
+          AIC = NA_real_, logLik = NA_real_, npar = NA_integer_,
+          hessian_pd = NA, grad_max = NA_real_, converged_strict = FALSE,
+          n_warnings = length(res$warnings),
+          warn_hessian = grepl("Hessian", paste(res$warnings, collapse=" | "), ignore.case = TRUE),
+          warn_nan = grepl("NaN", paste(res$warnings, collapse=" | "), ignore.case = TRUE),
+          first_warning = if (length(res$warnings)) res$warnings[[1]] else NA_character_
+        )
+      }
+      i <- i + 1
+    }
+  }
+}
+
+aic_table <- bind_rows(rows) %>%
+  arrange(AIC) %>%
+  mutate(DeltaAIC = AIC - min(AIC, na.rm = TRUE))
+
+print(aic_table, n = nrow(aic_table))
+
+
+
+
+
+```
+
+Only Three models do not have Hessian warning.
+
+Poisson_spOFF_OFF	Poisson	off	off
+NB1_spOFF_OFF	NB1	off	off
+NB2_spOFF_IID	NB2	off	iid
+
+| Model                 | AIC   | Hessian | Comment                                                      |
+| --------------------- | ----- | ------- | ------------------------------------------------------------ |
+| **Poisson_spOFF_OFF** | 22.16 | ✅       | Best AIC, simplest model                                     |
+| **NB1_spOFF_OFF**     | 24.16 | ✅       | Similar fit, negligible overdispersion                       |
+| **NB2_spOFF_IID**     | 28.16 | ✅       | Adds iid temporal effect, stable but slightly worse AIC (+6) |
+| **Poisson_spON_IID**  | 28.16 |          |  |
+
+Among all candidate models, the Poisson and NB1 models without spatial or temporal random effects exhibited the lowest AIC and passed curvature testing. The NB2 model with iid temporal structure (NB2_spOFF_IID) also converged successfully with a positive-definite Hessian, indicating a valid likelihood curvature. However, its higher AIC (ΔAIC ≈ 6) suggests limited improvement in model fit relative to the simpler alternatives.
+
+```{r}
+
+readr::write_csv(aic_table, "aic_table_with_hessian.csv")
+```
+
+
+####2
+```{r}
+# Find the row for the combo
+idx <- with(aic_table, which(family == "Poisson" & spatial == "off" & spatiotemporal == "off"))
+
+stopifnot(length(idx) == 1)          # ensure it exists uniquely
+fit <- fits[[idx]]      # create the named object you expected
+
+
+summary(fit)
+
+
+sanity(fit)
+
+
+res <- simulateResiduals(fit, n = 500)
+plot(res)
+testSpatialAutocorrelation(res, x = df$X, y = df$Y)
+
+
+```
+
+
+### [new]5.5 Subset curvature testing by parameter groups
+
+```{r}
+# column names of the fixed-effect design matrix (same order as b_j)
+Xnames <- colnames(fit$tmb_data$X_ij[[1]])
+p <- length(Xnames)                  # number of fixed effects
+
+# pull estimates & SEs for the first p entries of par.fixed / cov.fixed
+beta_est <- as.numeric(fit$sd_report$par.fixed[1:p])
+beta_se  <- sqrt(diag(fit$sd_report$cov.fixed))[1:p]
+
+fixed_tab <- data.frame(term = Xnames, estimate = beta_est, se = beta_se)
+fixed_tab
+
+drug_idx <- grepl("OXYCODONE|HYDROCODONE|BUPRENORPHINE|METHADONE",
+                  Xnames, ignore.case = TRUE)
+
+demo_idx <- grepl("unemploy|gini|poverty|disabil|noinsurance",
+                  Xnames, ignore.case = TRUE)
+
+
+
+# Covariance (inverse Hessian)
+V <- fit$sd_report$cov.fixed
+
+# Extract the drug block
+V_drug <- V[drug_idx, drug_idx, drop = FALSE]
+
+# Eigenvalues (curvature)
+eig_drug <- eigen(V_drug, symmetric = TRUE)$values
+cat("Min eigenvalue:", min(eig_drug), "\n")
+cat("Max eigenvalue:", max(eig_drug), "\n")
+
+# Condition number
+cond_drug <- max(eig_drug) / min(eig_drug)
+cat("Condition number:", cond_drug, "\n")
+```
+Curvature diagnostics for the opioid-related predictors yielded a minimum eigenvalue of 73.80 and a condition number of 21.63, indicating a well-conditioned and convex sub-Hessian. This suggests that the model estimates for OXYCODONE, HYDROCODONE, BUPRENORPHINE, and METHADONE effects are stable and not affected by severe multicollinearity or local non-identifiability.
+
+
+
+### [new]5.6 Curvature Diagnostics.
+
+```{r}
+drug_terms <- grep(
+  "OXYCODONE_annual_percapita_z|HYDROCODONE_annual_percapita_z|BUPRENORPHINE_annual_percapita_z|METHADONE_annual_percapita_z",
+  names(fit$sd_report$par.fixed),
+  value = TRUE
+)
+
+
+demo_terms <- grep("unemploy|gini|poverty|disability|noinsurance", names(fit$sd_report$par.fixed), value = TRUE)
+
+
+vcov_mat <- fit$sd_report$cov.fixed
+
+
+
+# define the covariance / Hessian
+vcov_mat <- fit$sd_report$cov.fixed
+
+# identify variable positions by name pattern
+drug_idx <- grepl("OXYCODONE|HYDROCODONE|BUPRENORPHINE|METHADONE", Xnames, ignore.case = TRUE)
+demo_idx <- grepl("unemploy|gini|poverty|disabil|noinsurance", Xnames, ignore.case = TRUE)
+
+# extract the relevant sub-matrices
+H_drug <- vcov_mat[drug_idx, drug_idx, drop = FALSE]
+H_demo <- vcov_mat[demo_idx, demo_idx, drop = FALSE]
+
+# curvature / conditioning tests
+eig_drug <- eigen(H_drug, symmetric = TRUE)$values
+eig_demo <- eigen(H_demo, symmetric = TRUE)$values
+eig_drug
+eig_demo
+
+
+```
+```{r}
+# Compute condition numbers for text output
+cond_drug <- max(eig_drug) / min(eig_drug)
+cond_demo <- max(eig_demo) / min(eig_demo)
+cat("Condition number (Drug block):", round(cond_drug, 2), "\n")
+cat("Condition number (Demographic block):", round(cond_demo, 2), "\n")
+```
+
+
+To evaluate parameter stability and local identifiability, we examined the curvature of the fixed-effect covariance (inverse Hessian) matrix for thematically grouped predictors.
+The drug-related block (OXYCODONE, HYDROCODONE, BUPRENORPHINE, METHADONE) yielded a minimum eigenvalue of 73.8 and a condition number of 21.6, while the demographic block (unemployment rate, Gini index, poverty, disability, and insurance) produced a minimum eigenvalue of 104.2 and a condition number of 15.1.
+Both sets of predictors showed positive-definite curvature and low condition numbers, indicating a well-behaved likelihood surface with no evidence of multicollinearity or numerical instability.
+
+#### Visulization
+```{r}
+curv_df <- data.frame(
+  Eigenvalue = c(eig_drug, eig_demo),
+  Index = c(seq_along(eig_drug), seq_along(eig_demo)),
+  Block = rep(c("Drug predictors", "Demographic predictors"),
+              times = c(length(eig_drug), length(eig_demo)))
+)
+
+ggplot(curv_df, aes(x = Index, y = Eigenvalue, color = Block)) +
+  geom_point(size = 3) +
+  geom_line(linewidth = 0.8) +
+  scale_y_log10() +
+  scale_x_continuous(breaks = 1:max(curv_df$Index)) +
+  labs(
+    title = "Eigenvalue Spectrum (Curvature Test)",
+    subtitle = "Ordered eigenvalues of fixed-effect covariance matrix (log scale)",
+    x = "Eigenvalue Index (λ1 … λn)",
+    y = "Eigenvalue (log scale)",
+    color = "Block"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "top",
+    panel.grid.minor = element_blank()
+  )
+
+
+```
+#### overall curvature
+```{r}
+# Extract full covariance matrix from fit
+V_all <- fit$sd_report$cov.fixed  # same as vcov(fit) if available
+
+# Compute eigenvalues of the full matrix
+eig_all <- eigen(V_all, symmetric = TRUE)$values
+
+# Report min/max and condition number
+cat("Global curvature check:\n")
+cat("Min eigenvalue:", min(eig_all), "\n")
+cat("Max eigenvalue:", max(eig_all), "\n")
+cat("Condition number:", max(eig_all) / min(eig_all), "\n")
+
+# Optional visualization (scree plot)
+df_all <- data.frame(Index = seq_along(eig_all), Eigenvalue = eig_all)
+
+ggplot(df_all, aes(x = Index, y = Eigenvalue)) +
+  geom_point(size = 2) +
+  geom_line() +
+  scale_y_log10() +
+  labs(
+    title = "Global Eigenvalue Spectrum of Fixed-Effect Covariance",
+    subtitle = "Curvature across all predictors combined",
+    x = "Eigenvalue Index (λ₁ … λₙ)",
+    y = "Eigenvalue (log scale)"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+Global Curvature Diagnostics.
+The eigenvalue spectrum of the fixed-effect covariance matrix revealed a smooth, monotonic decay spanning approximately three orders of magnitude (Figure X).
+All eigenvalues were positive, indicating a convex log-likelihood surface and stable optimization.
+The condition number of the full Hessian (≈ 10²–10³) was well within acceptable limits, confirming that all predictors were jointly identifiable and that the estimation surface exhibited no numerical instability.
+Together with blockwise curvature results, this analysis supports the reliability and well-conditioning of the final NB2 model.
+
+### 5.7 Bracketing analysis (deterministic)
+```{r}
+make_imputed <- function(df, value) {
+  df |> mutate(Deaths = ifelse(is.na(Deaths) | suppressed==1, value, Deaths))
+}
+
+df1 <- make_imputed(df, 1)
+df5 <- make_imputed(df, 5)
+df9 <- make_imputed(df, 9)
+
+fit1 <- update(fit_nb1_ar1, data = df1)
+fit5 <- update(fit_nb1_ar1, data = df5)
+fit9 <- update(fit_nb1_ar1, data = df9)
+
+AIC(fit1, fit5, fit9)
+# Extract ST SD and (if AR1) rho:
+# sdmTMB::sigma(fitX, "spatiotemporal"); summary(fitX)$sd_report$rho
+
+```
+
+
+### 5.4 Modeling
+```{r, message=FALSE, warning=FALSE}
+
+df <- df %>%
+  mutate(
+    time_index = match(year, sort(unique(year))),  # 1..T consecutive
+    log_pop    = log(pop_CDC)
+  )
+
+# Fit NB1 with AR(1) spatiotemporal field + offset ---------------------
+fit_Poisson_spON_IID <- sdmTMB(
+  Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z + 
+    HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + 
+    METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z + 
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z,
+  data = df,
+  mesh = mesh,
+  family = poisson(link = "log"),
+  spatial = "on",
+  spatiotemporal = "iid",
+  time = "time_index",
+  offset = df$log_pop,
+  control = sdmTMBcontrol(newton_loops = 2)  # a bit more robust
+)
+
+
+fit_nb1_ar1_nospatial <- sdmTMB(
+  Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z + 
+    HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + 
+    METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z + 
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z,
+  data = df,
+  mesh = mesh,
+  family = nbinom1(link = "log"),
+  spatial = "off",
+  spatiotemporal = "ar1",
+  time = "time_index",
+  offset = df$log_pop,
+  control = sdmTMBcontrol(newton_loops = 2)  # a bit more robust
+)
+
+AIC(fit_nb1_ar1, fit_nb1_ar1_nospatial)
+
+
+
+
+```
+
+AIC comparison between the full spatiotemporal model (AIC = 486.3) and a model without spatial random effects (AIC = 484.3) indicated that spatial curvature contributed minimally to overall model fit (ΔAIC = 2.0). Thus, most of the variation in mortality risk was explained by temporal trends and county-level covariates rather than residual spatial dependence.
+
+
+
+
+
+
+```{r}
+
+summary(fit_nb1_ar1)
+sanity(fit_nb1_ar1)
+```
+A spatiotemporal negative binomial (NB1) model with AR(1) temporal correlation was used to examine county-level opioid-related mortality between 2016–2019, accounting for overdispersion and population size via an offset term. The model incorporated predictors representing emergency department (ER) visit rates, prescription drug distributions, and socioeconomic factors from the American Community Survey (ACS).
+
+Results indicated a strong temporal autocorrelation (ρ = 0.94), suggesting that mortality patterns were highly persistent over time. The dispersion parameter (1.45) confirmed moderate overdispersion, validating the use of the NB1 specification. Spatial variation was minimal (spatial SD ≈ 0), implying that most geographic variability was captured by the time-varying component rather than static spatial effects.
+
+Among the predictors, higher disability rates were significantly associated with increased mortality (β = 0.44, SE = 0.22), indicating that a 1-SD increase in disability prevalence corresponded to approximately a 55% higher expected mortality rate (exp(0.44) = 1.55). In contrast, higher hydrocodone prescription rates were negatively associated with mortality (β = –0.58, SE = 0.27), suggesting a 44% lower mortality rate per 1-SD increase (exp(–0.58) = 0.56). Gini index (income inequality) showed a marginally positive relationship (β = 0.32, SE = 0.18), while other predictors—including ER visit rates, unemployment, poverty, and insurance coverage—were not statistically significant.
+
+The intercept (β₀ = –9.47) represents the baseline log mortality rate, corresponding to an estimated 7.7 deaths per 100,000 population when all predictors are at their mean values. This baseline aligns with state-level mortality estimates from CDC reports during the same period.
+
+Overall, the results highlight disability prevalence and income inequality as potential structural risk factors for opioid-related mortality, independent of ER visit rates and opioid prescription levels. The strong temporal autocorrelation underscores the stability of local mortality patterns over time, emphasizing the importance of longitudinal, place-based interventions.
+
+
+### 5.6 Hurdle
+```{r}
+fit_delta <- sdmTMB(
+  Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z + 
+    HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + 
+    METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z + 
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z,
+  data = df,
+  mesh = mesh,
+  family = delta_gamma(link1 = "logit", link2 = "log"),
+  spatial = "off",
+  spatiotemporal = "off",       # or "ar1" / "off"
+  time = "time_index",
+  offset = df$log_pop,          # optional: applies to the positive part
+  control = sdmTMBcontrol(newton_loops = 2)
+)
+summary(fit_delta)
+
+```
+
+```{r}
+V <- fit_delta$sd_report$cov.fixed[[2]]  # Use Gamma part (continuous outcome)
+eig <- eigen(V, symmetric = TRUE)$values
+range(eig)
+plot(eig, type="b", log="y", ylab="Eigenvalue (log scale)",
+     xlab="Parameter curvature index", main="Curvature (Gamma part)")
+
+```
+
+
+
+```{r}
+sanity(fit_delta)
+fit_delta$sd_report$pdHess   # should be TRUE
+
+```
+
+
+
+
+
+### 5.5 Extract and Interpret Coefficients
+```{r}
+library(broom)
+coef_table <- broom::tidy(fit_nb1_ar1, conf.int = TRUE)
+print(coef_table)
+
+```
+
+
+### 5.6 Check Model Diagnostics
+
+```{r, message=FALSE, warning=FALSE}
+# Sanity check for convergence and stability
+sanity(fit_nb1_ar1)
+
+# Simulated residuals
+library(DHARMa)
+sim <- simulate(fit_nb1_ar1, nsim = 250)
+pp  <- predict(fit_nb1_ar1)
+mu  <- exp(pp$est)  # expected counts on response scale
+
+dh <- DHARMa::createDHARMa(
+  simulatedResponse = sim,
+  observedResponse  = df$Deaths,
+  fittedPredicted   = mu
+)
+
+plot(dh)
+testUniformity(dh)
+testDispersion(dh)
+testOutliers(dh)
+
+```
+
+### 5.7 Visualize Spatial & Spatiotemporal Effects
+```{r fig.width=10}
+# 1) Predict on the observed rows
+p <- predict(fit_nb1_ar1)  # link scale (log mu)
+
+# 2) Add expected deaths + rate per 100k
+pred_df <- df %>%
+  mutate(
+    mu           = exp(p$est),
+    rate_per100k = (mu / pop_CDC) * 1e5
+  )
+
+# 3) Summarize to county-year (one value per polygon per year)
+pred_cy <- pred_df %>%
+  filter(!is.na(year))%>%
+  group_by(County, year) %>%
+  summarise(rate_per100k = mean(rate_per100k, na.rm = TRUE), .groups = "drop")
+
+# Standardize names first
+pred_cy2 <- pred_cy %>%
+  mutate(County = toupper(County)) %>%
+  filter(!is.na(year))
+
+counties_sf2 <- counties_sf %>%
+  mutate(County = toupper(County))
+
+# Keep only counties present in pred_cy
+counties_sub <- counties_sf2 %>%
+  filter(County %in% unique(df$County))
+
+# Join (sf stays sf because it's on the left)
+map_cy <- counties_sub %>%
+  left_join(pred_cy2, by = "County")
+
+counties_lab <- counties_sf2 %>%
+  mutate(County = toupper(County)) %>%
+  filter(County %in% keep_cnty) %>%   # only the modeled counties
+  st_point_on_surface() %>%                        # centroid guaranteed inside polygon
+  st_as_sf()
+
+# Compute a single reference (e.g., median predicted rate) per county
+lab_colors <- pred_map %>%
+  st_drop_geometry() %>%
+  group_by(County) %>%
+  summarise(ref_rate = median(pred_rate_per100k, na.rm = TRUE), .groups = "drop") %>%
+  mutate(light = ref_rate >= median(ref_rate, na.rm = TRUE))
+
+counties_lab2 <- counties_lab %>% left_join(lab_colors, by = "County")
+
+
+# Plot
+p_plot <- ggplot(map_cy) +
+  geom_sf(aes(fill = rate_per100k), color = "white", size = 0.2) +
+  facet_wrap(~ year) +
+  scale_fill_viridis_c(na.value = "grey90") +
+  labs(title = "Predicted Mortality (per 100,000)",
+       fill  = "Deaths / 100k") +
+  theme_void()+
+  geom_sf_text(
+  data = counties_lab2,
+  aes(label = County, color = light),
+  size = 2.4,
+  check_overlap = TRUE
+  ) +
+  scale_color_manual(values = c("white", "black"), guide = "none")
+
+
+# --- RAW rates per 100k, by county-year --------------------------------------
+raw_cy <- df %>%
+  filter(!is.na(year)) %>%
+  group_by(County, year) %>%
+  summarise(
+    deaths_obs = sum(Deaths, na.rm = TRUE),
+    pop_year   = mean(pop_CDC, na.rm = TRUE),
+    raw_rate_per100k = (deaths_obs / pop_year) * 1e5,
+    .groups = "drop"
+  )
+
+# Standardize names
+raw_cy2 <- raw_cy %>%
+  mutate(County = toupper(County))
+
+counties_sf2 <- counties_sf %>%
+  mutate(County = toupper(County))
+
+# Keep only counties present in raw data
+keep_cnty_raw <- unique(raw_cy2$County)
+counties_sub_raw <- counties_sf2 %>%
+  filter(County %in% keep_cnty_raw)
+
+# Join (sf stays sf because it's on the left)
+map_cy_raw <- counties_sub_raw %>%
+  left_join(raw_cy2, by = "County")
+
+# Label points (centroids) for those same counties
+counties_lab_raw <- counties_sub_raw %>%
+  st_point_on_surface() %>%
+  st_as_sf()
+
+# Choose label color by county-level median raw rate for contrast
+lab_colors_raw <- map_cy_raw %>%
+  st_drop_geometry() %>%
+  group_by(County) %>%
+  summarise(ref_rate = median(raw_rate_per100k, na.rm = TRUE), .groups = "drop") %>%
+  mutate(light = ref_rate >= median(ref_rate, na.rm = TRUE))
+
+counties_lab2_raw <- counties_lab_raw %>%
+  left_join(lab_colors_raw, by = "County")
+
+# --- Plot: RAW mortality (per 100k) ------------------------------------------
+raw_plot <- ggplot(map_cy_raw) +
+  geom_sf(aes(fill = raw_rate_per100k), color = "white", size = 0.2) +
+  facet_wrap(~ year) +
+  scale_fill_viridis_c(na.value = "grey90") +
+  labs(title = "Observed Mortality (per 100,000)",
+       fill  = "Deaths / 100k") +
+  theme_void() +
+  geom_sf_text(
+    data = counties_lab2_raw,
+    aes(label = County, color = light),
+    size = 2.4,
+    check_overlap = TRUE
+  ) +
+  scale_color_manual(values = c("white", "black"), guide = "none")
+
+p_plot
+raw_plot
+
+```
+
+
+#### [To-do]5.7.2 Random-effect contribution (spatial + spatiotemporal) on polygons
+```{r}
+# 0) Clean names and drop NA years in the data used for prediction
+df_rf <- df %>%
+  mutate(County = toupper(County)) %>%
+  filter(!is.na(year))
+
+# 1) Predictions with and without random fields (on the SAME rows/order as df_rf)
+p_full <- predict(fit_nb1_ar1)                 # fixed + random fields (link scale: log mu)
+p_fix  <- predict(fit_nb1_ar1, re_form = ~0)   # fixed effects only      (link scale)
+
+# 2) Total random-field contribution on the link scale
+df_rf <- df_rf %>%
+  mutate(rf_link = p_full$est - p_fix$est)     # omega_s + epsilon_st
+
+# 3) Aggregate to county-year
+rf_cy <- df_rf %>%
+  group_by(County, year) %>%
+  summarise(rf_link = mean(rf_link, na.rm = TRUE), .groups = "drop")
+
+# 4) Prepare polygons: standardize names and keep only modeled counties
+counties_sf2 <- counties_sf %>%
+  mutate(County = toupper(County))
+
+counties_sub <- counties_sf2 %>%
+  filter(County %in% unique(rf_cy$County))
+
+# 5) Join with sf on the LEFT to preserve geometry
+map_rf <- counties_sub %>%
+  left_join(rf_cy, by = "County")
+
+# 6) Plot
+ggplot(map_rf) +
+  geom_sf(aes(fill = rf_link), color = "white", size = 0.2) +
+  facet_wrap(~ year) +
+  scale_fill_viridis_c(option = "plasma", na.value = "grey90") +
+  labs(
+    title = "Random-field contribution (log scale): spatial + AR(1)",
+    fill  = "RF (log)"
+  ) +
+  theme_void()+
+  geom_sf_text(
+    data = counties_lab2_raw,
+    aes(label = County, color = light),
+    size = 2.4,
+    check_overlap = TRUE
+  ) +
+  scale_color_manual(values = c("white", "black"), guide = "none")
+
+
+```
+Note. Each county is colored to show how much unexplained risk of opioid deaths remains after accounting for known factors (like ER visits, drug use, income, and insurance rates).
+
+Yellow and orange areas = more deaths than the model expected
+
+Purple and blue areas = fewer deaths than the model expected
+
+The spatiotemporal random field (AR1 = 0.94) revealed persistent county-level heterogeneity in opioid-related mortality across Alabama from 2016–2019. After adjusting for ER visits, prescription rates, and socioeconomic indicators, Jefferson and Shelby counties retained substantial positive spatial random effects, suggesting unmeasured local drivers of elevated mortality risk. In contrast, rural western counties exhibited negative random effects, implying mortality lower than expected given observed predictors. The high temporal autocorrelation suggests stability in these residual spatial patterns over time.
+
+```{r}
+# Label geometry (centroid of polygon interior)
+# lab_pts <- st_point_on_surface(counties_sf)
+# 
+# ggplot(map_cy) +
+#   geom_sf(aes(fill = rate_per100k), color = "white", size = 0.2) +
+#   geom_sf_text(
+#     data = lab_pts %>% left_join(pred_cy %>% group_by(County) %>%
+#                                    summarise(rate = mean(rate_per100k, na.rm = TRUE), .groups = "drop"),
+#                                  by = c("County" = "County")),
+#     aes(label = County,
+#         color = rate < median(rate, na.rm = TRUE)),  # dark text on high fill; light on low
+#     size = 2.6
+#   ) +
+#   scale_color_manual(values = c("black", "white"), guide = "none") +
+#   scale_fill_viridis_c(na.value = "grey90") +
+#   labs(title = "Predicted opioid mortality (per 100,000) with county labels",
+#        fill  = "Deaths / 100k") +
+#   theme_void()
+
+```
+
+### [To-do]5.8 Compare Alternative Models
+
+```{r}
+# fit_nb1_iid <- update(fit_nb1_ar1, spatiotemporal = "iid")
+# fit_pois_ar1 <- update(fit_nb1_ar1, family = poisson(link = "log"))
+# 
+# AIC(fit_nb1_ar1, fit_nb1_iid, fit_pois_ar1)
+
+```
+
+
+## 6.Truncated NB1
+
+```{r}
+set.seed(123)
+
+
+# 1) PRELIMINARY MODEL (NB1, no spatiotemporal)
+form_fixed <- Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
+  HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +
+  METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z +
+  poverty_rate_z + disability_rate_z + noinsurance_rate_z
+
+fit0 <- sdmTMB(
+  formula = form_fixed,
+  data = df,
+  mesh = mesh,
+  family = nbinom1(link = "log"),
+  spatial = "on",            # keep spatial if you want baseline geography
+  spatiotemporal = "off",    # <-- no ST here (per the plan)
+  offset = df$log_pop,
+  control = sdmTMBcontrol(newton_loops = 1)
+)
+
+# Expected mean μ̂ on the link scale => convert to response scale
+p0 <- predict(fit0)           # link: log(mu)
+mu_hat <- exp(p0$est)
+
+# Extract NB1 dispersion parameter phi (variance = mu * (1 + phi))
+phi <- fit0$family$phi
+if (is.null(phi) || !is.finite(phi)) {
+  stop("Could not extract NB1 dispersion 'phi' from fit0$family$phi")
+}
+
+# ------------------------------------------------------------------------------
+# 2) Sampler for truncated NB1 on {1,2,...,9} using sdmTMB:::dnbinom1
+# ------------------------------------------------------------------------------
+
+sample_trunc_nb1_1to9 <- function(mu, phi, n = 1L) {
+  # support 1..9
+  y <- 1:9
+  # NB1 pmf values (sdmTMB internal)
+  pr <- sdmTMB:::dnbinom1(y, mu = mu, phi = phi)
+  pr <- pr / sum(pr)
+  sample(y, size = n, replace = TRUE, prob = pr)
+}
+
+# Vectorized imputation for a vector of mus
+impute_vec_nb1_1to9 <- function(mu_vec, phi) {
+  # one draw per element of mu_vec
+  vapply(mu_vec, function(m) sample_trunc_nb1_1to9(m, phi, n = 1L), numeric(1))
+}
+
+# ------------------------------------------------------------------------------
+# 3) MULTIPLE IMPUTATION LOOP: create M datasets, refit full ST model each time
+# ------------------------------------------------------------------------------
+
+M <- 20  # increase to 50–100 for final runs
+fits <- vector("list", M)
+aic  <- rep(NA_real_, M)
+
+for (m in seq_len(M)) {
+  # Copy data & impute suppressed cells by truncated NB1
+  df_m <- df
+  idx  <- with(df_m, suppressed | is.na(Deaths))
+
+  if (any(idx)) {
+    df_m$Deaths[idx] <- impute_vec_nb1_1to9(mu_hat[idx], phi)
+  }
+
+  # Fit your FULL model: NB1 + AR1 + offset
+  fit_m <- try(
+    sdmTMB(
+      formula = form_fixed,
+      data = df_m,
+      mesh = mesh,
+      family = nbinom1(link = "log"),
+      spatial = "on",
+      spatiotemporal = "ar1",
+      time = "time_index",
+      offset = df_m$log_pop,
+      control = sdmTMBcontrol(newton_loops = 2)
+    ),
+    silent = TRUE
+  )
+
+  if (!inherits(fit_m, "try-error")) {
+    fits[[m]] <- fit_m
+    aic[m]    <- AIC(fit_m)
+  }
+}
+
+# Keep successful fits
+ok <- !vapply(fits, is.null, TRUE)
+fits_ok <- fits[ok]
+aic_ok  <- aic[ok]
+
+cat("Successful fits:", sum(ok), "out of", M, "\n")
+summary(aic_ok)
+
+# ------------------------------------------------------------------------------
+# 4) Summarize coefficients / ST parameters across imputations (simple pooling)
+#    (For formal MI pooling, apply Rubin’s rules; here we show quick summaries.)
+# ------------------------------------------------------------------------------
+
+# Example: grab fixed-effect estimates into a matrix
+coef_mat <- do.call(rbind, lapply(fits_ok, function(f)
+  broom::tidy(f) %>% dplyr::filter(effect == "fixed") %>% dplyr::pull(estimate)
+))
+col_names <- broom::tidy(fits_ok[[1]]) %>% dplyr::filter(effect == "fixed") %>% dplyr::pull(term)
+colnames(coef_mat) <- col_names
+
+# Quick pooled summary (means & SDs of estimates across imputations)
+coef_mean <- apply(coef_mat, 2, mean, na.rm = TRUE)
+coef_sd   <- apply(coef_mat, 2, sd,   na.rm = TRUE)
+data.frame(term = names(coef_mean), mean = coef_mean, sd = coef_sd)
+
+# Example: extract AR1 rho and ST SD, if available in your version
+extract_rho <- function(f) {
+  sr <- try(summary(f)$sd_report, silent = TRUE)
+  if (inherits(sr, "try-error") || is.null(sr$rho)) return(NA_real_)
+  as.numeric(sr$rho)
+}
+rho_vec <- vapply(fits_ok, extract_rho, numeric(1))
+summary(rho_vec)
+
+# Spatial/ST SDs (some versions offer helpers; otherwise use sd_report fields)
+# Example helper if available:
+# sdmTMB::sigma(f, what = "spatiotemporal")  # marginal SD
+
+```
+
+## 7.EM method
+```{r}
+# Simple helper for EM imputation
+exp_trunc_nb1 <- function(mu, phi) {
+  # Support 1..9 (CDC suppression range)
+  y <- 1:9
+  
+  # NB1 pmf from sdmTMB
+  p <- sdmTMB:::dnbinom1(y, mu = mu, phi = phi)
+  p <- p / sum(p)  # normalize (truncate)
+  
+  # Expected value and round to integer
+  round(sum(y * p))
+}
+
+```
+
+
+### 7.1 Replace Death with raw data
+
+Because we imputated and standardized Deaths previously, we need replace death with raw data for EM method.
+```{r}
+df_em <- df %>%
+  select(-Deaths) %>%  # remove old column
+  left_join(
+    mortality_filted %>% select(County, year, Deaths),
+    by = c("County", "year")
+  )
+```
+
+
+### 7.2 Initial Model without Spatiotemporal
+
+```{r}
+# Flag suppressed cells: TRUE if CDC-suppressed OR NA
+df_em <- df_em %>%
+  mutate(
+    suppressed = is.na(Deaths) | (!is.na(Deaths) & Deaths %in% c(1:9) & FALSE) # tweak if you have an explicit flag
+  ) #%>%
+#  filter(if_all(all_of(need_vars), ~ is.finite(.x) | (cur_column()=="Deaths" & suppressed))) # allow suppressed Deaths
+
+# Make mesh on the same rows you will fit:
+mesh <- make_mesh(
+  df_em %>% filter(!is.na(X), !is.na(Y)),
+  xy_cols = c("X","Y"),
+  cutoff = diff(range(df_em$X, na.rm = TRUE))/10
+)
+
+
+# Fixed effects used in both E/M steps:
+form_fixed <- Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
+  HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +
+  METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z +
+  poverty_rate_z + disability_rate_z + noinsurance_rate_z
+
+# form_fixed <- Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
+#   HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +
+#   METHADONE_annual_percapita_z
+
+
+
+# 1) Keep only rows you can model (no NA in y, coords, offset, or predictors)
+data_fit <- df_em %>%
+  filter(!is.na(Deaths)) %>%
+  drop_na(log_pop)   # replace lon/lat with your xy columns
+# If you have other predictors, add them to drop_na(...)
+
+# 2) Build the mesh on THIS exact data
+mesh_fit <- make_mesh(
+  data_fit,
+  xy_cols = c("X","Y"),
+  cutoff = diff(range(df$X, na.rm = TRUE)) / 10
+)
+
+
+# 3) Fit using the matching data + mesh
+fit_init <- sdmTMB(
+  formula = form_fixed,
+  data    = data_fit,
+  mesh    = mesh_fit,
+  family  = nbinom1(link = "log"),
+  spatial = "off",
+  spatiotemporal = "off",
+  offset  = data_fit$log_pop,
+  control = sdmTMBcontrol(newton_loops = 1)
+)
+summary(fit_init)
+# Predict μ on ALL rows (including suppressed) using fixed+spatial init
+p_init <- predict(fit_init, newdata = df_em, re_form = NA)  # include spatial RF from init
+mu_hat <- exp(p_init$est)
+
+phi <- exp(fit_init$parlist$ln_phi)
+
+
+stopifnot(is.finite(phi))
+
+```
+
+
+
+### 7.3 Deterministic EM
+```{r}
+for (iter in 1:max_iter) {
+
+  # --- E-step: impute suppressed cells using current mean ---
+  idx <- df_em$suppressed
+  if (any(idx)) {
+    #df_em$Deaths_imp[idx] <- round(mu_hat[idx])  # simple expected fill
+    df_em$Deaths_imp[idx] <- pmax(1, round(mu_hat[idx]))
+  }
+
+  # --- M-step: refit model with updated data ---
+  df_mod <- df_em
+  df_mod$Deaths <- df_mod$Deaths_imp
+
+  fit_full <- sdmTMB(
+    formula = form_fixed,
+    data    = df_mod,
+    mesh    = mesh,
+    family  = nbinom1(link = "log"),
+    spatial = "off",
+    spatiotemporal = "off",
+    offset  = df_mod$log_pop,
+    control = sdmTMBcontrol(newton_loops = 1)
+  )
+
+  # --- update parameters ---
+  mu_new <- exp(predict(fit_full)$est)
+  phi_new <- fit_full$family$phi
+  ll_new <- as.numeric(logLik(fit_full))
+
+  # --- check convergence ---
+  if (abs(ll_new - ll_old) < tol) {
+    message(sprintf("EM converged at iter %d (ΔLL=%.4f)", iter, ll_new - ll_old))
+    break
+  }
+
+  # --- prepare next iteration ---
+  mu_hat <- mu_new
+  phi <- phi_new
+  ll_old <- ll_new
+}
+
+# final imputed data
+df_final <- df_em
+df_final$Deaths <- df_final$Deaths_imp
+
+
+```
+
+
+```{r}
+# final full model (spatial + AR1)
+fit_sp_ar1_final <- sdmTMB(
+  formula = form_fixed,
+  data    = df_final,
+  mesh    = mesh,
+  family  = nbinom1(link = "log"),
+  spatial = "on",
+  spatiotemporal = "ar1",
+  time    = "time_index",
+  offset  = df_final$log_pop,
+  control = sdmTMBcontrol(newton_loops = 2)
+)
+
+summary(fit_sp_ar1_final)
+
+sanity(fit_sp_ar1_final)
+
+```
+
+The “baseline” rate is extremely low, so almost all observed variation comes from your predictors (opioid rates, poverty, etc.) and spatiotemporal effects, not from the intercept.
+
+A ρ = 0.95 indicates high temporal stability: the latent spatiotemporal process (like unobserved risk) is consistent from year to year rather than fluctuating wildly.
+```{r}
+
+names(fit_sp_ar1_final)
+
+tab <- tidy(fit_sp_ar1_final, effects = "fixed", conf.int = TRUE)
+tab$z <- tab$estimate / tab$std.error
+tab$p.value <- 2 * (1 - pnorm(abs(tab$z)))
+
+tab$p.value <- ifelse(tab$p.value < .001,
+                       "<0.001",
+                       formatC(tab$p.value, format = "f", digits = 3))
+
+tab
+
+
+```
+
+### 7.4 Hurdler model with EM imputation
+```{r}
+fit_sp_ar1_final <- sdmTMB(
+  formula = form_fixed,
+  data    = df_final,
+  mesh    = mesh,
+  family  = nbinom1(link = "log"),
+  spatial = "on",
+  spatiotemporal = "ar1",
+  time    = "time_index",
+  offset  = df_final$log_pop,
+  control = sdmTMBcontrol(newton_loops = 2)
+)
+
+summary(fit_sp_ar1_final)
+
+
+fit_delta_imputated <- sdmTMB(
+  formula = form_fixed,
+  data = df_final,
+  mesh = mesh,
+  family = delta_gamma(link1 = "logit", link2 = "log"),
+  spatial = "on",
+  spatiotemporal = "ar1",       # or "ar1" / "off"
+  time = "time_index",
+  offset = df_final$log_pop,          # optional: applies to the positive part
+  control = sdmTMBcontrol(newton_loops = 2)
+)
+summary(fit_delta)
+```
+### True Hurdle with imputation
+```{r}
+df_final$any_death <- as.integer(df_final$Deaths > 0)
+
+rhs_terms <- attr(terms(form_fixed), "term.labels")
+form_zero <- reformulate(rhs_terms, response = "any_death")
+
+# keep only rows fully observed for the zero model
+keep <- complete.cases(model.frame(form_zero, data = df_final))
+dfz  <- df_final[keep, , drop = FALSE]
+
+# all predictors finite?
+stopifnot(all(is.finite(as.matrix(model.matrix(reformulate(rhs_terms), dfz)))))
+
+# any NA in time or coords?
+stopifnot(all(is.finite(dfz$time_index)))
+# replace these with your coordinate columns if needed:
+# stopifnot(all(is.finite(dfz$X) & is.finite(dfz$Y)))
+
+# do we have both 0 and 1?
+table(dfz$any_death)  # if all 0 or all 1 in some years/areas, simplify model
+
+
+fit0 <- sdmTMB(
+  formula = form_zero,
+  data    = dfz,
+  mesh    = mesh,                 # ignored when spatial="off"
+  family  = binomial(link = "logit"),
+  spatial = "off",
+  spatiotemporal = "off"
+)
+summary(fit0)
+
+
+```
+
+```{r}
+# add AR(1) only
+fit0_sp <- sdmTMB(
+  form_zero, dfz, mesh,
+  family  = binomial(link = "logit"),
+  spatial = "on",
+  spatiotemporal = "off",
+  time    = "time_index",
+  control = sdmTMBcontrol(newton_loops = 2)
+)
+
+# then add spatial if AR1 was OK
+fit0_sp_iid <- sdmTMB(
+  form_zero, dfz, mesh,
+  family  = binomial(link = "logit"),
+  spatial = "on",
+  spatiotemporal = "iid",
+  time    = "time_index",
+  control = sdmTMBcontrol(newton_loops = 2)
+)
+
+
+```
+```{r}
+df_pos   <- subset(df_final, Deaths > 0)
+rhs      <- attr(terms(form_fixed), "term.labels")
+form_pos <- reformulate(rhs, response = "Deaths")
+
+fit_pos_ar1 <- sdmTMB(
+  form_pos, df_pos, mesh,
+  family  = nbinom1(link = "log"),
+  spatial = "on",
+  spatiotemporal = "ar1",
+  time    = "time_index",
+  offset  = df_pos$log_pop,
+  control = sdmTMBcontrol(newton_loops = 2)
+)
+summary(fit_pos_ar1); sanity(fit_pos_ar1)
+
+
+
+```
+

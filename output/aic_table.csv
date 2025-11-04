@@ -1,0 +1,57 @@
+"model","family","spatial","spatiotemporal","form","AIC","logLik","npar","hessian_pd","grad_max","converged_strict","n_warnings","warn_hessian","warn_nan","first_warning","DeltaAIC"
+"Poisson_spOFF_OFF_form.er","Poisson","off","off","form.er",4.14347735841821,-0.0717386792091051,2,TRUE,3.14693099700501e-10,TRUE,0,FALSE,FALSE,NA,0
+"NB2_spOFF_OFF_form.er","NB2","off","off","form.er",6.14347735841801,-0.0717386792090048,3,FALSE,0.01542416829607,FALSE,2,TRUE,TRUE,"NaNs produced",1.9999999999998
+"Poisson_spON_OFF_form.er","Poisson","on","off","form.er",8.14347735843297,-0.0717386792164874,4,FALSE,2.6277157619625e-10,FALSE,13,TRUE,TRUE,"NA/NaN function evaluation",4.00000000001476
+"NB2_spON_OFF_form.er","NB2","on","off","form.er",10.1434775500188,-0.0717387750093863,5,FALSE,0.00589485912110475,FALSE,2,TRUE,TRUE,"NaNs produced",6.00000019160056
+"Poisson_spON_AR1_form.er","Poisson","on","ar1","form.er",12.1434773583371,-0.0717386791685612,6,FALSE,2.85505403342754e-10,FALSE,20,TRUE,TRUE,"NA/NaN function evaluation",7.99999999991891
+"Poisson_spOFF_OFF_form.er.cov","Poisson","off","off","form.er.cov",14.1379614815752,-0.0689807407875895,7,TRUE,2.93465728881647e-09,TRUE,0,FALSE,FALSE,NA,9.99448412315697
+"NB2_spON_AR1_form.er","NB2","on","ar1","form.er",14.1434791009872,-0.0717395504935894,7,FALSE,5.77989272254823e-05,FALSE,20,TRUE,TRUE,"NA/NaN function evaluation",10.000001742569
+"Poisson_spON_OFF_form.er.cov","Poisson","on","off","form.er.cov",18.1379614815702,-0.0689807407851006,9,FALSE,2.56171616139897e-09,FALSE,15,TRUE,TRUE,"NA/NaN function evaluation",13.994484123152
+"Poisson_spOFF_AR1_form.er.cov","Poisson","off","ar1","form.er.cov",20.1379629312331,-0.0689814656165311,10,FALSE,2.77855360900062e-06,FALSE,2,TRUE,TRUE,"NaNs produced",15.9944855728149
+"Poisson_spON_AR1_form.er.cov","Poisson","on","ar1","form.er.cov",22.1379614815653,-0.0689807407826493,11,FALSE,2.93257366099731e-09,FALSE,2,TRUE,TRUE,"NaNs produced",17.9944841231471
+"Poisson_spOFF_OFF_form.inter.cov","Poisson","off","off","form.inter.cov",30.1365973394734,-0.0682986697366797,15,FALSE,0.00455467624731724,FALSE,1,TRUE,FALSE,"The model may not have converged: non-positive-definite Hessian matrix.",25.9931199810551
+"NB2_spOFF_OFF_form.inter.cov","NB2","off","off","form.inter.cov",32.1365973747756,-0.0682986873878231,16,FALSE,0.00623243939119557,FALSE,3,TRUE,TRUE,"NA/NaN function evaluation",27.9931200163574
+"Poisson_spOFF_OFF_form.inter.cov.spline","Poisson","off","off","form.inter.cov.spline",34.13658456256,-0.0682922812799829,17,FALSE,0.0222585824358769,FALSE,1,TRUE,FALSE,"The model may not have converged: non-positive-definite Hessian matrix.",29.9931072041418
+"Poisson_spOFF_AR1_form.inter.cov","Poisson","off","ar1","form.inter.cov",36.1365972793174,-0.0682986396587069,18,FALSE,0.00487274262565004,FALSE,4,TRUE,TRUE,"NA/NaN function evaluation",31.9931199208992
+"NB2_spOFF_AR1_form.inter.cov","NB2","off","ar1","form.inter.cov",38.1365997938347,-0.0682998969173525,19,FALSE,0.0829662342921721,FALSE,2,TRUE,TRUE,"NA/NaN function evaluation",33.9931224354165
+"NB2_spOFF_OFF_form","NB2","off","off","form",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spOFF_OFF_form.er.cov","NB2","off","off","form.er.cov",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spOFF_OFF_form.er.spline","NB2","off","off","form.er.spline",NA,NA,NA,NA,NA,FALSE,7,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spOFF_OFF_form.er.cov.spline","NB2","off","off","form.er.cov.spline",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spOFF_OFF_form.inter.cov.spline","NB2","off","off","form.inter.cov.spline",NA,NA,NA,NA,NA,FALSE,1,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spOFF_AR1_form","NB2","off","ar1","form",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spOFF_AR1_form.er","NB2","off","ar1","form.er",NA,NA,NA,NA,NA,FALSE,15,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spOFF_AR1_form.er.cov","NB2","off","ar1","form.er.cov",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spOFF_AR1_form.er.spline","NB2","off","ar1","form.er.spline",NA,NA,NA,NA,NA,FALSE,4,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spOFF_AR1_form.er.cov.spline","NB2","off","ar1","form.er.cov.spline",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spOFF_AR1_form.inter.cov.spline","NB2","off","ar1","form.inter.cov.spline",NA,NA,NA,NA,NA,FALSE,1,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spON_OFF_form","NB2","on","off","form",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spON_OFF_form.er.cov","NB2","on","off","form.er.cov",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spON_OFF_form.inter.cov","NB2","on","off","form.inter.cov",NA,NA,NA,NA,NA,FALSE,1,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spON_OFF_form.er.spline","NB2","on","off","form.er.spline",NA,NA,NA,NA,NA,FALSE,7,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spON_OFF_form.er.cov.spline","NB2","on","off","form.er.cov.spline",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spON_OFF_form.inter.cov.spline","NB2","on","off","form.inter.cov.spline",NA,NA,NA,NA,NA,FALSE,1,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spON_AR1_form","NB2","on","ar1","form",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spON_AR1_form.er.cov","NB2","on","ar1","form.er.cov",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spON_AR1_form.inter.cov","NB2","on","ar1","form.inter.cov",NA,NA,NA,NA,NA,FALSE,1,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spON_AR1_form.er.spline","NB2","on","ar1","form.er.spline",NA,NA,NA,NA,NA,FALSE,5,FALSE,TRUE,"NA/NaN function evaluation",NA
+"NB2_spON_AR1_form.er.cov.spline","NB2","on","ar1","form.er.cov.spline",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"NB2_spON_AR1_form.inter.cov.spline","NB2","on","ar1","form.inter.cov.spline",NA,NA,NA,NA,NA,FALSE,1,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spOFF_OFF_form","Poisson","off","off","form",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"Poisson_spOFF_OFF_form.er.spline","Poisson","off","off","form.er.spline",NA,NA,NA,NA,NA,FALSE,8,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spOFF_OFF_form.er.cov.spline","Poisson","off","off","form.er.cov.spline",NA,NA,NA,NA,NA,FALSE,1,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spOFF_AR1_form","Poisson","off","ar1","form",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"Poisson_spOFF_AR1_form.er","Poisson","off","ar1","form.er",NA,NA,NA,NA,NA,FALSE,18,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spOFF_AR1_form.er.spline","Poisson","off","ar1","form.er.spline",NA,NA,NA,NA,NA,FALSE,5,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spOFF_AR1_form.er.cov.spline","Poisson","off","ar1","form.er.cov.spline",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"Poisson_spOFF_AR1_form.inter.cov.spline","Poisson","off","ar1","form.inter.cov.spline",NA,NA,NA,NA,NA,FALSE,3,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spON_OFF_form","Poisson","on","off","form",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"Poisson_spON_OFF_form.inter.cov","Poisson","on","off","form.inter.cov",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"Poisson_spON_OFF_form.er.spline","Poisson","on","off","form.er.spline",NA,NA,NA,NA,NA,FALSE,8,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spON_OFF_form.er.cov.spline","Poisson","on","off","form.er.cov.spline",NA,NA,NA,NA,NA,FALSE,1,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spON_OFF_form.inter.cov.spline","Poisson","on","off","form.inter.cov.spline",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"Poisson_spON_AR1_form","Poisson","on","ar1","form",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"Poisson_spON_AR1_form.inter.cov","Poisson","on","ar1","form.inter.cov",NA,NA,NA,NA,NA,FALSE,2,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spON_AR1_form.er.spline","Poisson","on","ar1","form.er.spline",NA,NA,NA,NA,NA,FALSE,7,FALSE,TRUE,"NA/NaN function evaluation",NA
+"Poisson_spON_AR1_form.er.cov.spline","Poisson","on","ar1","form.er.cov.spline",NA,NA,NA,NA,NA,FALSE,0,FALSE,FALSE,NA,NA
+"Poisson_spON_AR1_form.inter.cov.spline","Poisson","on","ar1","form.inter.cov.spline",NA,NA,NA,NA,NA,FALSE,2,FALSE,TRUE,"NA/NaN function evaluation",NA
