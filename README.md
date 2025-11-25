@@ -1,4 +1,4 @@
-# Opioid ER–Death Spatiotemporal Modeling Template
+# Opioid ER–Death Spatiotemporal Modeling
 
 This repository provides a full modeling framework for analyzing the relationship between **opioid overdose ER visits**, **opioid overdose deaths**, **drug consumption**, and **socioeconomic factors** using:
 
