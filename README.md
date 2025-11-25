@@ -276,12 +276,83 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## Citation
+# Important Data Links
 
-If you use this repository, please cite:
+This project integrates ER visits, opioid consumption, socioeconomic, and geographic data from multiple public sources.  
+Below is a comprehensive list of all key datasets used in the workflow.
 
-```
-Li, J. (2025). Opioid ER–Death Spatiotemporal Modeling Framework.
-University of Alabama.
-```
+---
 
+## Emergency Department (ER) Data
+- Alabama Department of Public Health: Opioid Overdose ER Visits  
+  https://www.alabamapublichealth.gov/opioids/
+
+- CDC Drug Overdose Surveillance and Epidemiology (DOSE)  
+  https://www.cdc.gov/drugoverdose/datavault.html
+
+---
+
+## Mortality / Death Count Data
+- CDC WONDER: Multiple Cause of Death  
+  https://wonder.cdc.gov/mcd.html
+
+- CDC Restricted Data / Suppressed Counts Documentation  
+  https://www.cdc.gov/nchs/data_access/restrictions.htm
+
+---
+
+## Opioid Prescription / Consumption Data
+- ARCOS (DEA):  
+  https://www.deadiversion.usdoj.gov/arcos/
+
+- DEA ARCOS Retail Drug Summary Reports  
+  https://www.deadiversion.usdoj.gov/arcos/retail_drug_summary/
+
+- MME Conversion Reference  
+  https://www.cdc.gov/opioids/providers/prescribing/mmme.html
+
+---
+
+## Socioeconomic & Demographic Data (SES Variables)
+- U.S. Census American Community Survey (ACS)  
+  https://data.census.gov/
+
+- ACS API Documentation  
+  https://www.census.gov/data/developers/data-sets/acs-5year.html
+
+- County-level Poverty, Unemployment, Insurance  
+  https://www.ers.usda.gov/data-products/county-level-data-sets/
+
+---
+
+## Rural–Urban Classification
+- USDA Rural–Urban Continuum Codes (RUCC)  
+  https://www.ers.usda.gov/data-products/rural-urban-continuum-codes/
+
+- NCHS Urban–Rural Classification Scheme  
+  https://www.cdc.gov/nchs/data-analysis-tools/urban-rural.html
+
+---
+
+## Geographic Boundaries / Shapefiles
+- TIGER/Line Shapefiles (Counties)  
+  https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html
+
+- `tigris` R package (recommended for automated AL county geometries)  
+  https://github.com/walkerke/tigris
+
+- Alabama State GIS Office  
+  https://gis.alabama.gov/
+
+---
+
+## Substance Use & Public Health Background Reports
+- JAMA Study Referenced (ER–Death correlation)  
+  https://jamanetwork.com/journals/jamanetworkopen/fullarticle/2794462
+
+- SAMHSA Opioid Overdose Resources  
+  https://www.samhsa.gov/find-help/prevention/opioid
+
+---
+
+If additional datasets are added later, include them here for central reference.
