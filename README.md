@@ -1,276 +1,295 @@
 🧮 Opioid ER–Death Spatiotemporal Modeling Project
+Alabama Counties, 2016–2019
+1. Overview
 
-Analysis of opioid overdose ER visits, deaths, drug consumption, SES, and urban–rural factors across Alabama (2016–2019)
+This project analyzes the relationship between:
 
-📌 Overview
+Opioid overdose ER visits
 
-This project examines:
+Opioid overdose deaths
 
-How ER overdose visits relate to overdose deaths
+Four opioid medications (Oxycodone, Hydrocodone, Buprenorphine, Methadone)
 
-How the relationship varies by drug type, SES, urban–rural context, and time
+Socioeconomic conditions (SES)
 
-County-level spatial and spatiotemporal dynamics
+Urban–rural classifications
 
-When and why the ER–death correlation becomes negative, as highlighted in prior research
+Spatial and temporal structure
 
-Core methods include GLMM, sdmTMB spatiotemporal models, PCA indices, and interaction models.
+It aims to identify when and why the ER–death relationship becomes negative, a key scientific finding and publication requirement.
 
-📊 Data Sources
-Source	Description
-ARCOS (DEA)	Oxycodone, Hydrocodone, Buprenorphine, Methadone consumption
-ADPH	ER overdose visits (monthly & annual)
-CDC NCHS	Overdose death counts
-ACS	Socioeconomic variables
-USDA / CDC	Urban–Rural Continuum Code (URcode)
-Census	Population denominators
-🔧 Methods Summary
-1. Descriptive Analysis
+2. Data Sources
 
-County/month/year summaries
+Clinical & Public Health
 
-Seasonal (quarterly) breakdown
+ADPH — ER overdose visits (monthly/annual)
 
-Demographic trends
+CDC NCHS — overdose deaths
+
+Drug Consumption
+
+DEA ARCOS — Oxy/Hydro/Bup/Methadone
+
+Socioeconomic & Demographics
+
+ACS — poverty, disability, uninsurance, Gini, unemployment
+
+Census — population counts
+
+Geographic
+
+USDA RUCC — rural–urban codes
+
+tigris — county shapefiles
+
+3. Method Summary
+3.1 Descriptive Analysis
+
+Monthly / quarterly / annual summaries
+
+Demographic breakdown
 
 Outlier detection
 
-Moran’s I for spatial autocorrelation
+Moran’s I spatial autocorrelation
 
 Temporal correlation
 
-2. Statistical Modeling
+3.2 Statistical Models
 GLMM (County-level)
 
-Poisson, NB2, zero-inflated, hurdle models
+Poisson, NB2, zero-inflated, hurdle
 
-Random intercepts + year slopes
+Random intercepts + random year slopes
 
-Curvature tests for drugs & ER
+Curvature tests (ER², Drug²)
 
-EM algorithm for two-hurdle Poisson
+EM algorithm for hurdle regression
 
-Offset: log(pop)
+Offset = log(population)
 
-Spatiotemporal (sdmTMB)
+Spatiotemporal Models (sdmTMB)
 
 Families: Poisson, NB2, Tweedie
 
 Spatial: "on" / "off"
 
-Spatiotemporal: "off", "iid", "rw", "ar1"
+Temporal: "off", "iid", "rw", "ar1"
+
+Mesh refined to ~5 km edges
 
 Extract spatial random fields (hotspots/coldspots)
 
-Mesh refinement (~5 km edge length)
+3.3 Interaction Models
 
-3. Interaction Models
-
-Used to explore when ER–death correlation becomes negative:
+We test when the ER–death relationship flips:
 
 ER-only
 
 ER + covariates
 
-ER + drugs
+ER + drug consumption
 
 ER × drug
 
 ER × SES
 
-ER × drug × URcode
+ER × Year
 
-ER × spline(time)
+ER × URcode
 
-ER × PCA indices (Opioid_Index_z, SES_Index_z)
+ER × PCA indices (Opioid_Index, SES_Index)
 
-4. Dimensionality Reduction (PCA)
+3.4 PCA Indices (Dimensionality Reduction)
 
-Created indices:
+Opioid_Index_z
 
-Opioid_Index_z (4 opioid drugs)
+PC1 of Oxy/Hydro/Bup/Meth
 
-SES_Index_z (poverty, disability, unemployment, Gini, uninsurance)
+Reflects general opioid environment
 
-Both reversed → higher = worse conditions.
+SES_Index_z
 
-📅 Major Progress Timeline
+PC1 of poverty, disability, unemployment, uninsurance, Gini
+
+Both reversed so higher = worse.
+
+4. Timeline (Readable Phase Format)
 Phase 1 — Foundations (May 2025)
 
-ANOVA-like tables
+ANOVA-style county comparison
 
-Monthly/annual/SES descriptive stats
+Outlier & trend detection
 
-Outlier detection
+Moran’s I spatial tests
 
-Moran’s I spatial analysis
+Temporal autocorrelation
 
-Phase 2 — Modeling Start (Jun 2025)
+Phase 2 — Modeling Begins (Jun 2025)
 
-GLMM & sdmTMB setup
+GLMM and sdmTMB basic models
 
-Poisson vs NB2 vs Tweedie
+Poisson vs NB2 vs Tweedie family check
 
-Begin ER × Drug exploration
+Seasonal/quarterly summaries
 
-Seasonal summaries
+Initial ER × drug interaction tests
 
 Phase 3 — Spatial/Temporal Expansion (Jul 2025)
 
-Quarterly ER & consumption figures
+Quarterly ER + drug rate figures
 
-Spatiotemporal heatmaps
+Spatiotemporal heatmaps for ER & consumption
 
-Combined medication figures
-
-Beginning of hotspot analysis
+Combined multi-drug figures
 
 Phase 4 — Model Comparison (Aug 2025)
 
-GLMM vs S–S AIC comparison
+GLMM vs S–S model AIC comparison
 
-County-specific estimates
+Mesh refinement
 
-Mesh tuning
+County-specific parameter extraction
 
-Population-adjusted Table 1
+Updated Table 1 (per million population)
 
-Phase 5 — Advanced Models (Sep–Oct 2025)
+Phase 5 — Missing Data + Advanced Modeling (Sep–Oct 2025)
 
-Hurdle & zero-inflated models
+Zero-inflated + hurdle models
 
-MICE imputation for death suppression
+MICE imputation for suppressed CDC deaths
 
-ER–drug–death annual models
+EM algorithm for two-hurdle Poisson
 
-PCA-based reduction
+Curvature terms tested
 
-EM (two-hurdle Poisson)
+PCA feature reduction added
 
-Curvature tests
+Phase 6 — Interactions + URcode (Nov 2025)
 
-Phase 6 — Interaction & URcode (Nov 2025)
+Final comparison models:
 
-Final models: 1, 10, 24, 27
+Model 1
 
-ER × drug × SES interactions
+Model 10
 
-Urban–rural moderation
+Model 24
 
-Heatmaps for Death/Bupren/Methadone
+Model 27
 
-Key result: conditions where ER–death turns negative
+Urban–rural interaction modeling (URcode)
 
-🧾 Update Log (Clean, Chronological)
-2025-11-17
+Heatmaps for Death, Buprenorphine, Methadone
 
-Added URcode (urban–rural) stratification
+Identified windows where ER–death becomes negative
 
-ER-only, ER+cov, ER+drug, ER×drug, ER×SES, spline-based models tested
+5. Update Log (Highly Readable Format)
 
-Investigated when ER–death correlation becomes negative
+Tip: This structure fits GitHub’s monospace blocks and indentation perfectly.
 
-2025-11-12
+🗓️ 2025-11-17
 
-Finalized four Poisson comparison models
+Added URcode (Rural/Urban continuum)
 
-Identified negative ER–death correlation transitions
+Built ER-only, ER+cov, ER+drug, ER×drug, ER×SES models
 
-2025-11-03
+Investigated negative ER–death correlation behavior
 
-Kept coefficient tables + DHARMa for Models 1, 10, 24, 27
+🗓️ 2025-11-12
 
-Added heatmaps for Death, Buprenorphine, Methadone
+Finalized 4 Poisson models
 
-2025-10-20
+Established when ER–death flips sign
 
-EM-based two-hurdle Poisson procedure
+🗓️ 2025-11-03
 
-PCA predictors retaining 80–90% variance
+Kept key coefficient tables + DHARMa results
 
-Imputation for suppressed values (<1 or >9)
+Added heatmaps: Death, Buprenorphine, Methadone
 
-2025-10-06
+🗓️ 2025-10-20
 
-Death outcome changed to rate
+EM-based two-hurdle Poisson implemented
 
-Curvature testing (ER & drugs)
+PCA 80–90% variance feature reduction
 
-MICE imputation evaluation
+Handling suppressed values (<1 or >9)
 
-2025-09-22
+🗓️ 2025-10-06
 
-Spatiotemporal models for deaths (annual)
+Switched deaths → rates
 
-Explored illegal drug signals
+Added curvature tests (ER, drug)
 
-Fourier/Haar seasonal decomposition
+Evaluated MICE imputation
 
-2025-09-08
+🗓️ 2025-09-22
 
-Hurdle modeling for ER
+Annual spatiotemporal death models
 
-MICE imputation for deaths
+Illegal drug signal exploration
 
-ER–drug–death annual analysis
+Fourier/Haar seasonality decomposition
 
-2025-08-12
+🗓️ 2025-09-08
 
-Interaction plots added
+Hurdle model for ER visits
 
-GLMM “Top 5 county” summaries
+Imputation for suppressed deaths
 
-2025-08-11
+Annual ER–drug–death relationships
 
-Table 1 revised with per-million rates
+🗓️ 2025-08-12
 
-Tables 2–5 (drug consumption) added
+GLMM interaction plots
 
-tigris mapping
+Top-5 county comparison
 
-GLMM vs S–S model comparison
+🗓️ 2025-08-11
 
-Spatial mesh refinement
+Revised Table 1
 
-2025-07-22
+Added Tables 2–5 (drug consumption)
 
-Added spatiotemporal model parameters
+Added county mapping
 
-Offsets and family selection discussion
+GLMM vs S–S comparison
 
-2025-07-21
+Mesh refinement completed
 
-Updated Table 1 for missing counties
+🗓️ 2025-07-21
 
-Added quarterly ER & consumption figures
+Updated Table 1
 
-Combined medication figures; annual MME version
+Added quarterly ER & drug figures
 
-2025-07-08
+Added annual medication consumption rates
 
-Moran’s I for ER + drugs
+🗓️ 2025-07-08
 
-Seasonal summaries
+Moran’s I for ER & drugs
 
-Moved insignificant figures
+Seasonal analysis
 
-2025-06-26
+Simplified figure set
+
+🗓️ 2025-06-26
 
 Began using sdmTMB for GLMM-like models
 
-2025-06-24
+🗓️ 2025-06-24
 
-Fixed minor data issues
+Cleaned minor data issues
 
-Four-drug graphs for northern counties
+Built four-drug northern county graphs
 
-2025-06-10
+🗓️ 2025-06-10
 
-Monthly increasing-trend detection
+Trend detection in Cherokee/Etowah/Jackson/Lauderdale
 
-Buprenorphine & “third drug” displays
+Added Buprenorphine and other drug per capita trends
 
-2025-05 (Initial)
+🗓️ May 2025
 
 ANOVA-like summaries
 
@@ -278,31 +297,22 @@ Outlier detection
 
 Moran’s I
 
-Temporal correlation diagnostics
+Temporal correlation
 
-📁 Planned Deliverables
+6. Remaining Tasks
 
-Full spatiotemporal model output
+Finalize S–S outputs
 
-Report-ready figures and tables
+Outlier fixes in S–S models
 
-ER × Drug × SES × URcode models
+Add ACS variables
 
-Manuscript-ready results
+Expand ER × Drug × SES × URcode interactions
 
-Heatmaps for all outcomes
+Produce manuscript-ready tables & figures
 
-GLMM + S–S comparison
+7. Helpful Links
 
-PCA interpretation plots
+USDA Rural–Urban Codes: https://www.ers.usda.gov/data-products/rural-urban-continuum-codes
 
-🔗 Useful Links
-
-Urban–Rural Codes (USDA):
-https://www.ers.usda.gov/data-products/rural-urban-continuum-codes
-
-CDC Urban–Rural Classification:
-https://www.cdc.gov/nchs/data-analysis-tools/urban-rural.html
-
-JAMA 2022 ER–Death paper:
-https://jamanetwork.com/journals/jamanetworkopen/fullarticle/2794462
+CDC Urban–Rural Classification: https://www.cdc.gov/nchs/data-analysis-tools/urban-rural.html
