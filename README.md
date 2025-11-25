@@ -9,7 +9,9 @@ This repository provides a full modeling framework for analyzing the relationshi
 - EM-based modeling for suppressed CDC death data
 - A Shiny dashboard for model comparison
 
-![Example visualization](./static/example_plot.png)
+![Model Comparison Shiny Version](https://v6fozf-joshua-lee.shinyapps.io/shiny/)
+
+
 
 ---
 
