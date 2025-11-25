@@ -210,13 +210,28 @@ df_er_drug_mortality_acs <- left_join(
   )
 #summary(mortality_filted)
 
+unique(df_er_drug_mortality_acs$CountyCode)
+```
+### [New] 1.6 NCHS Urban-Rural Data Read and Prepare 
+
+```{r , message=FALSE, warning=FALSE}
+NCHS <- read_csv("../Data/NCHSurb-rural-codes.csv")
+
+# Merge Urban-Rural code
+df_er_drug_mortality_acs_UR <- left_join(
+  df_er_drug_mortality_acs,
+  NCHS,
+  by = c("CountyCode")
+  )
+
+summary(df_er_drug_mortality_acs_UR$CODE2023)
+
 
 ```
 
-
-#### 1.5.1 Select Predictors in ACS
+### 1.7 Select Predictors in ACS
 ```{r , message=FALSE, warning=FALSE}
-df_er_drug_mortality_acs <- df_er_drug_mortality_acs%>%
+df_er_drug_mortality_acs_UR <- df_er_drug_mortality_acs_UR%>%
   mutate(
     unemployee_rate = employment_status_for_the_population_16_years_and_over_total_in_labor_force_civilian_labor_force_unemployed/employment_status_for_the_population_16_years_and_over_total_in_labor_force_civilian_labor_force,
     
@@ -243,10 +258,15 @@ df_er_drug_mortality_acs <- df_er_drug_mortality_acs%>%
     ),
     # Optional: per-capita or per-100k version
     noinsurance_rate    = noinsurance / total_population_total,
-    noinsurance_per100k = noinsurance_rate * 1e5)
+    noinsurance_per100k = noinsurance_rate * 1e5,
+    
+    # Urban_Rural Code is CODE2023
+    # If use CODE2013, four counties have different UR code:Franklin (6->5), Jefferson(1->2), Pickens(4->3) ,Tuscaloosa (4->3)
+    URcode = as.factor(CODE2023)
+    )
 
 
-write.csv(df_er_drug_mortality_acs, "../Data/ER_DRUG_DEATH_ACS.csv")
+write.csv(df_er_drug_mortality_acs_UR, "../Data/ER_DRUG_DEATH_ACS.csv")
 ```
 In the CDC mortality dataset, only annual data points are available. To address suppressed death counts, we applied *mice* imputation. However, in the spatiotemporal model only 45 of 88 observations passed due to missing values. Among the remaining 44 observations, 21 were recorded as zero.
 
@@ -254,11 +274,12 @@ In the CDC mortality dataset, only annual data points are available. To address 
 ### 2.1 Select Predictors
 ```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
 # Read merged data
-df_er_drug_mortality_acs <- read.csv("../Data/ER_DRUG_DEATH_ACS.csv")
+df_er_drug_mortality_acs_UR <- read.csv("../Data/ER_DRUG_DEATH_ACS.csv")
 
-df_select <- df_er_drug_mortality_acs%>%
+df_select <- df_er_drug_mortality_acs_UR%>%
   select(
     County,
+    URcode,
     year,
     pop_CDC,
     # Deaths
@@ -313,7 +334,7 @@ df_em <- df_select_z %>%
 
 
 # Fixed effects used in both E/M steps:
-form_fixed <- Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
+form_fixed <- Deaths ~ URcode+ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
   HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +
   METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z +
   poverty_rate_z + disability_rate_z + noinsurance_rate_z
@@ -484,7 +505,144 @@ Fit a preliminary NB1 model without ST, predict μ̂, then for suppressed cells 
 Treat suppressed values as interval-censored counts (P(1≤Y≤9)). A Bayesian Poisson/NB BYM2/INLA model can incorporate this directly; in sdmTMB, you’d need custom likelihood.
 
 
-## [Updated]5. Spatiotemporal Model
+
+## 4. Correlation of Predictors
+
+### 4.1 Select Predictors
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+df_cor <- df_imputated%>%
+  select(
+    County,
+    URcode,
+    year,
+    pop_CDC,
+    # Deaths
+    Deaths,
+    Deaths_1,
+    Deaths_5,
+    Deaths_9,
+    Deaths_em,
+    # ER visit
+    ER_annual_percapita,
+    # Drugs
+    OXYCODONE_annual_percapita,	HYDROCODONE_annual_percapita,	BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
+
+    # ACS
+    unemployee_rate,	gini_index,	poverty_rate,	disability_rate, noinsurance_rate
+    )
+
+```
+
+### 4.2 Data Standardization
+```{r}
+
+#Choose Death from Deaths, Deaths_rate, Deaths_1, Death_5, Death_9, Death_em
+# Death_select <- "Deaths_em"
+Death_select <- c("Deaths","Deaths_1", "Deaths_5", "Deaths_9","Deaths_em")
+
+scale_vars <-  c(
+    # Deaths
+#######################################################  
+    
+    #"Deaths"
+    Death_select,
+#######################################################    
+    # ER visit
+    "ER_annual_percapita",
+    # Drugs
+    "OXYCODONE_annual_percapita",	"HYDROCODONE_annual_percapita",	"BUPRENORPHINE_annual_percapita", "METHADONE_annual_percapita",
+
+    # ACS
+    "unemployee_rate",	"gini_index",	"poverty_rate",	"disability_rate", "noinsurance_rate"
+    )
+
+df_cor_rate <- df_cor %>%
+  mutate(Deaths_rate = Deaths / pop_CDC)%>%
+  mutate(Deaths_1_rate = Deaths_1 / pop_CDC)%>% 
+  mutate(Deaths_5_rate = Deaths_5 / pop_CDC)%>%  
+  mutate(Deaths_9_rate = Deaths_9 / pop_CDC)%>%  
+  mutate(Deaths_em_rate = Deaths_em / pop_CDC)%>%  
+  mutate(across(all_of(scale_vars), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
+
+
+df_cor_rate_only_cor <- df_cor_rate %>%
+  select(-c("County","year","pop_CDC"))%>%
+  select(-all_of(scale_vars)) 
+```
+
+
+```{r}
+p_heat <- ggcorr(
+  df_cor_rate_only_cor ,
+  method = c("pairwise.complete.obs", "pearson"),
+  label = TRUE, label_size = 3, hjust = 0.9, layout.exp = 1
+) + theme_minimal(base_size = 10)
+print(p_heat)
+
+```
+
+
+```{r , message=FALSE, warning=FALSE}
+df_cor_rate_num <- df_cor_rate %>% 
+  #select(where(is.numeric))     # keep only numeric vars
+  select(Deaths_em,Deaths_em_rate, ER_annual_percapita, OXYCODONE_annual_percapita, HYDROCODONE_annual_percapita, BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
+         unemployee_rate, gini_index, poverty_rate, disability_rate, noinsurance_rate
+  )
+
+p_pairs <- ggpairs(
+  df_cor_rate_num,
+  upper = list(continuous = wrap("cor", use = "pairwise.complete.obs", size = 3)),
+  lower = list(continuous = wrap("points", alpha = 0.4, size = 0.7)),
+  diag  = list(continuous = wrap("densityDiag", alpha = 0.6))
+) +
+  theme(
+    axis.text  = element_text(size = 7),
+    strip.text = element_text(size = 8)
+  )
+
+print(p_pairs)
+```
+#### 4.2.1 Check Collinearity
+
+```{r}
+library(corrplot)
+
+cor_mat <- cor(df_cor_rate_num, use = "pairwise.complete.obs")
+
+corrplot(cor_mat, method = "color", tl.cex = 0.8, number.cex = 0.7)
+
+```
+
+#### 4.2.2 Variance Inflation Factor (VIF)
+
+```{r}
+library(car)
+
+m <- lm(
+  Deaths_em ~ ER_annual_percapita + 
+    OXYCODONE_annual_percapita +
+    HYDROCODONE_annual_percapita +
+    BUPRENORPHINE_annual_percapita +
+    METHADONE_annual_percapita +
+    unemployee_rate + gini_index + poverty_rate + 
+    disability_rate + noinsurance_rate,
+  data = df_cor_rate_num
+)
+
+vif_values <- car::vif(m)
+vif_values
+
+```
+VIF < 3 → No concern
+
+3–5 → Mild collinearity
+
+5–10 → Consider removing / combining predictors
+
+ #>10 → Serious multicollinearity
+
+
+## 5. Spatiotemporal Model [Updated]
 
 ### 5.1 County geometry & coordinates
 ```{r}
@@ -525,104 +683,382 @@ mesh <- make_mesh(
 ### 5.2 Create Formula
 
 ```{r}
+# ## MODEL FORMULAS ( "." = additive, "x" = interaction )
+# 
+# ## Full main-effects model (ER . opioids . SES)
+# form_ER.All <- as.formula(
+#   Deaths_em_rate ~ ER_annual_percapita_z +                 # ER visits
+#     OXYCODONE_annual_percapita_z +                        # opioid types
+#     HYDROCODONE_annual_percapita_z +
+#     BUPRENORPHINE_annual_percapita_z +
+#     METHADONE_annual_percapita_z +
+#     unemployee_rate_z + gini_index_z +
+#     poverty_rate_z + disability_rate_z + noinsurance_rate_z
+# )
+# 
+# ## ER only
+# form_ER <- as.formula(
+#   Deaths_em_rate ~ ER_annual_percapita_z
+# )
+# 
+# ## ER . Opioids (additive)
+# form_ER.Opioid <- as.formula(
+#   Deaths_em_rate ~ ER_annual_percapita_z +
+#     OXYCODONE_annual_percapita_z +
+#     HYDROCODONE_annual_percapita_z +
+#     BUPRENORPHINE_annual_percapita_z +
+#     METHADONE_annual_percapita_z
+# )
+# 
+# ## ER . SES (additive)
+# form_ER.SES <- as.formula(
+#   Deaths_em_rate ~ ER_annual_percapita_z +
+#     unemployee_rate_z + gini_index_z +
+#     poverty_rate_z + disability_rate_z + noinsurance_rate_z
+# )
+# 
+# ## ER . Time (additive linear)
+# form_ER.Time <- as.formula(
+#   Deaths_em_rate ~ ER_annual_percapita_z +
+#     time_index
+# )
+# 
+# ## ER . SplineTime (additive nonlinear)
+# form_ER.Spline <- as.formula(
+#   Deaths_em_rate ~ ER_annual_percapita_z +
+#     s(time_index, k = 4)
+# )
+# 
+# ## ER x Time (interaction)
+# form_ERxTime <- as.formula(
+#   Deaths_em_rate ~ ER_annual_percapita_z * time_index
+# )
+# 
+# ## ER . SES . SplineTime (additive, no interaction)
+# form_ER.SES.Spline <- as.formula(
+#   Deaths_em_rate ~ ER_annual_percapita_z +
+#     unemployee_rate_z + gini_index_z +
+#     poverty_rate_z + disability_rate_z + noinsurance_rate_z +
+#     s(time_index, k = 4)
+# )
+# 
+# ## ER x Opioid . SES (ER interacts with opioids; SES additive)
+# form_ERxOpioid.SES <- as.formula(
+#   Deaths_em_rate ~
+#     ER_annual_percapita_z * (
+#       OXYCODONE_annual_percapita_z +
+#       HYDROCODONE_annual_percapita_z +
+#       BUPRENORPHINE_annual_percapita_z +
+#       METHADONE_annual_percapita_z
+#     ) +
+#     unemployee_rate_z + gini_index_z +
+#     poverty_rate_z + disability_rate_z + noinsurance_rate_z
+# )
+# 
+# ## ER x SES . Opioid (ER interacts with SES; opioids additive)
+# form_ERxSES.Opioid <- as.formula(
+#   Deaths_em_rate ~
+#     ER_annual_percapita_z * (
+#       unemployee_rate_z + gini_index_z +
+#       poverty_rate_z + disability_rate_z + noinsurance_rate_z
+#     ) +
+#     OXYCODONE_annual_percapita_z +
+#     HYDROCODONE_annual_percapita_z +
+#     BUPRENORPHINE_annual_percapita_z +
+#     METHADONE_annual_percapita_z
+# )
+# 
+# ## ER x (Opioid + SES) . Spline (maximal interaction)
+# form_ERxOpioidSES.Spline <- as.formula(
+#   Deaths_em_rate ~
+#     ER_annual_percapita_z * (
+#       OXYCODONE_annual_percapita_z +
+#       HYDROCODONE_annual_percapita_z +
+#       BUPRENORPHINE_annual_percapita_z +
+#       METHADONE_annual_percapita_z +
+#       unemployee_rate_z + gini_index_z +
+#       poverty_rate_z + disability_rate_z + noinsurance_rate_z
+#     ) +
+#     s(time_index, k = 4)
+# )
+# 
+# form_ERxOpioidSES.Time <- as.formula(
+#   Deaths_em_rate ~
+#     ER_annual_percapita_z * (
+#       OXYCODONE_annual_percapita_z +
+#       HYDROCODONE_annual_percapita_z +
+#       BUPRENORPHINE_annual_percapita_z +
+#       METHADONE_annual_percapita_z +
+#       unemployee_rate_z + gini_index_z +
+#       poverty_rate_z + disability_rate_z + noinsurance_rate_z
+#     ) +
+#     time_index
+# )
 
-form <- as.formula(Deaths_em_rate ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
-  HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +
-  METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z +
-  poverty_rate_z + disability_rate_z + noinsurance_rate_z)
 
-form.er <- as.formula(Deaths_em_rate ~ ER_annual_percapita_z)
+```
 
-form.er.cov <- as.formula(Deaths_em_rate ~ ER_annual_percapita_z + unemployee_rate_z +
-                        gini_index_z + poverty_rate_z + disability_rate_z + noinsurance_rate_z)
+#### Create Formula for Deaths_em, instead of Death rate
+```{r}
+## MODEL FORMULAS ( "." = additive, "x" = interaction )
 
-form.inter.cov <- as.formula(
-  Deaths_em_rate ~ ER_annual_percapita_z * (OXYCODONE_annual_percapita_z +
-                                       HYDROCODONE_annual_percapita_z +
-                                       BUPRENORPHINE_annual_percapita_z +
-                                       METHADONE_annual_percapita_z) +
+## Full main-effects model (ER . opioids . SES)
+form_ER.All <- as.formula(
+  Deaths_em ~ URcode + ER_annual_percapita_z +                 # ER visits
+    OXYCODONE_annual_percapita_z +                    # opioid types
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z +
     unemployee_rate_z + gini_index_z +
     poverty_rate_z + disability_rate_z + noinsurance_rate_z
 )
 
-
-form.er.spline <- as.formula(
-  Deaths_em_rate ~ ER_annual_percapita_z +
-    s(time_index, k = 4)
+## ER only
+form_ER <- as.formula(
+  Deaths_em ~ URcode + ER_annual_percapita_z
 )
 
-form.er.cov.spline <- as.formula(
-  Deaths_em_rate ~ ER_annual_percapita_z +
-    unemployee_rate_z + gini_index_z + poverty_rate_z +
-    disability_rate_z + noinsurance_rate_z +
-    s(time_index, k = 4)
-)
-
-form.inter.cov.spline <- as.formula(
-  Deaths_em_rate ~ ER_annual_percapita_z * (
+## ER . Opioids (additive)
+form_ER.Opioid <- as.formula(
+  Deaths_em ~ URcode + ER_annual_percapita_z +
     OXYCODONE_annual_percapita_z +
     HYDROCODONE_annual_percapita_z +
     BUPRENORPHINE_annual_percapita_z +
     METHADONE_annual_percapita_z
-  ) +
-    unemployee_rate_z + gini_index_z + poverty_rate_z +
-    disability_rate_z + noinsurance_rate_z +
+)
+
+## ER . SES (additive)
+form_ER.SES <- as.formula(
+  Deaths_em ~ URcode + ER_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER . Time (additive linear)
+form_ER.Time <- as.formula(
+  Deaths_em ~ URcode + ER_annual_percapita_z +
+    time_index
+)
+
+## ER . SplineTime (additive nonlinear)
+form_ER.Spline <- as.formula(
+  Deaths_em ~ URcode + ER_annual_percapita_z +
     s(time_index, k = 4)
+)
+
+## ER x Time (interaction)
+form_ERxTime <- as.formula(
+  Deaths_em ~ URcode + ER_annual_percapita_z * time_index
+)
+
+## ER . SES . SplineTime (additive, no interaction)
+form_ER.SES.Spline <- as.formula(
+  Deaths_em ~ URcode + ER_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z +
+    s(time_index, k = 4)
+)
+
+## ER x Opioid . SES (ER interacts with opioids; SES additive)
+form_ERxOpioid.SES <- as.formula(
+  Deaths_em ~ URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z
+    ) +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER x SES . Opioid (ER interacts with SES; opioids additive)
+form_ERxSES.Opioid <- as.formula(
+  Deaths_em ~ URcode + 
+    ER_annual_percapita_z * (
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    OXYCODONE_annual_percapita_z +
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z
+)
+
+## ER x (Opioid + SES) . Spline (maximal interaction)
+form_ERxOpioidSES.Spline <- as.formula(
+  Deaths_em ~ URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    s(time_index, k = 4)
+)
+
+form_ERxOpioidSES.Time <- as.formula(
+  Deaths_em ~ URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
+)
+
+
+form_ERxOpioidSES_UR.Time <- as.formula(
+  Deaths_em ~ URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
 )
 
 
 ```
 
+
+#### Try Formula for difference imputation
 ```{r}
-# 
-# form <- as.formula(Deaths_em_rate ~ ER_annual_percapita + OXYCODONE_annual_percapita +
-#   HYDROCODONE_annual_percapita + BUPRENORPHINE_annual_percapita +
-#   METHADONE_annual_percapita + unemployee_rate + gini_index +
-#   poverty_rate + disability_rate + noinsurance_rate)
-# 
-# form.er <- as.formula(Deaths_em_rate ~ ER_annual_percapita)
-# 
-# form.er.cov <- as.formula(Deaths_em_rate ~ ER_annual_percapita + unemployee_rate + 
-#                             gini_index + poverty_rate + disability_rate + noinsurance_rate)
-# 
-# form.inter.cov <- as.formula(
-#   Deaths_em_rate ~ ER_annual_percapita * (OXYCODONE_annual_percapita +
-#                                        HYDROCODONE_annual_percapita +
-#                                        BUPRENORPHINE_annual_percapita +
-#                                        METHADONE_annual_percapita) +
-#     unemployee_rate + gini_index +
-#     poverty_rate + disability_rate + noinsurance_rate
-# )
-# 
-# 
-# form.er.spline <- as.formula(
-#   Deaths_em_rate ~ ER_annual_percapita +
-#     s(time_index, k = 4)
-# )
-# 
-# form.er.cov.spline <- as.formula(
-#   Deaths_em_rate ~ ER_annual_percapita +
-#     unemployee_rate + gini_index + poverty_rate +
-#     disability_rate + noinsurance_rate +
-#     s(time_index, k = 4)
-# )
-# 
-# form.inter.cov.spline <- as.formula(
-#   Deaths_em_rate ~ ER_annual_percapita * (
-#     OXYCODONE_annual_percapita +
-#     HYDROCODONE_annual_percapita +
-#     BUPRENORPHINE_annual_percapita +
-#     METHADONE_annual_percapita
-#   ) +
-#     unemployee_rate + gini_index + poverty_rate +
-#     disability_rate + noinsurance_rate +
-#     s(time_index, k = 4)
-# )
-# 
+## MODEL FORMULAS ( "." = additive, "x" = interaction )
+
+## Full main-effects model (ER . opioids . SES)
+form_ER.All <- as.formula(
+  Deaths_9 ~ ER_annual_percapita_z +                 # ER visits
+    OXYCODONE_annual_percapita_z +                    # opioid types
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER only
+form_ER <- as.formula(
+  Deaths_9 ~ ER_annual_percapita_z
+)
+
+## ER . Opioids (additive)
+form_ER.Opioid <- as.formula(
+  Deaths_9 ~ ER_annual_percapita_z +
+    OXYCODONE_annual_percapita_z +
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z
+)
+
+## ER . SES (additive)
+form_ER.SES <- as.formula(
+  Deaths_9 ~ ER_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER . Time (additive linear)
+form_ER.Time <- as.formula(
+  Deaths_9 ~ ER_annual_percapita_z +
+    time_index
+)
+
+## ER . SplineTime (additive nonlinear)
+form_ER.Spline <- as.formula(
+  Deaths_9 ~ ER_annual_percapita_z +
+    s(time_index, k = 4)
+)
+
+## ER x Time (interaction)
+form_ERxTime <- as.formula(
+  Deaths_9 ~ ER_annual_percapita_z * time_index
+)
+
+## ER . SES . SplineTime (additive, no interaction)
+form_ER.SES.Spline <- as.formula(
+  Deaths_9 ~ ER_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z +
+    s(time_index, k = 4)
+)
+
+## ER x Opioid . SES (ER interacts with opioids; SES additive)
+form_ERxOpioid.SES <- as.formula(
+  Deaths_9 ~
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z
+    ) +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER x SES . Opioid (ER interacts with SES; opioids additive)
+form_ERxSES.Opioid <- as.formula(
+  Deaths_9 ~
+    ER_annual_percapita_z * (
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    OXYCODONE_annual_percapita_z +
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z
+)
+
+## ER x (Opioid + SES) . Spline (maximal interaction)
+form_ERxOpioidSES.Spline <- as.formula(
+  Deaths_9 ~
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    s(time_index, k = 4)
+)
+
+form_ERxOpioidSES.Time <- as.formula(
+  Deaths_9 ~
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
+)
+
+
+
 
 ```
 
-### [Updated] 5.3 Model Comparison and Curvature Testing (For EM)
+
+### 5.3 Model Comparison and Curvature Testing (For EM) [Updated] 
 
 ```{r}
 # ---------- helper: fit with warning capture ----------
@@ -646,16 +1082,22 @@ families <- list(
 spatial_opts <- c("off","on")
 st_opts      <- c("off","ar1") # "iid" if you want it
 
-# [New] Try different form. 10.28
+# [New] Try different form. 11.12
 form_opts <- c(
-  "form",
-  "form.er",
-  "form.er.cov",
-  "form.inter.cov",
-  "form.er.spline",
-  "form.er.cov.spline",
-  "form.inter.cov.spline"
+  "form_ER",
+  "form_ER.Opioid",
+  "form_ER.SES",
+  "form_ER.Time",
+  "form_ER.Spline",
+  "form_ERxTime",
+  "form_ER.SES.Spline",
+  "form_ERxOpioid.SES",
+  "form_ERxSES.Opioid",
+  "form_ERxOpioidSES.Spline",
+  "form_ERxOpioidSES.Time",
+  "form_ER.All"
 )
+
 
 fits <- list()
 rows <- list()
@@ -770,12 +1212,14 @@ datatable(
     autoWidth = TRUE
   )
 )
-#write.csv(aic_table, "output/aic_table.csv", row.names = FALSE)
 
+
+#write.csv(aic_table, "output/aic_table.csv", row.names = FALSE)
+saveRDS(fits, "../Shiny/fits.rds")
 
 ```
 
-### [New] 5.4 extract the coefficient estimate for ER_annual_percapita_z
+### 5.4 extract the coefficient estimate for ER_annual_percapita_z
 
 ```{r}
 # --- extract coefficient info for ER_annual_percapita_z ---
@@ -792,8 +1236,8 @@ coef_info <- lapply(names(fits), function(mname) {
       if (nrow(row) == 1) {
         return(tibble(
           model = mname,
-          coef_est = row$estimate,
-          coef_se = row$std.error
+          coef_est = round(row$estimate,3),
+          coef_se = round(row$std.error,3)
         ))
       }
     }
@@ -821,10 +1265,19 @@ datatable(
 
 #write.csv(aic_table_coef, "output/aic_table_coef.csv", row.names = FALSE)
 
+
+
+saveRDS(aic_table_coef, "../Shiny/aic_table_coef.rds")
+
+save(
+  df,
+  fits,
+  aic_table_coef,
+  file = "../Shiny/models.RData"
+)
+
+
 ```
-
-
-
 
 ### 5.4 Explore specific model
 ```{r}
@@ -833,8 +1286,7 @@ datatable(
 family.select = "Poisson"  # Replace with "Poisson", "NB1", "NB2"
 spatial.select = "on"      # Replace with "on", "off"
 spatiotemporla.select = "ar1"     # Replace with "off", "iid", "ar1"
-form.select = "form.inter.cov"                  #"form",  "form.er",  "form.er.cov",  "form.inter.cov",   "form.er.spline",  "form.er.cov.spline",  "form.inter.cov.spline"
-
+form.select = "form_ERxOpioidSES.Time"                  #"form",  "form.er",  "form.er.cov",  "form.inter.cov",   "form.er.spline",  "form.er.cov.spline",  "form.inter.cov.spline"
 
 
 
@@ -847,12 +1299,159 @@ stopifnot(length(idx) == 1)          # ensure it exists uniquely
 fit <- fits[[idx]]      # create the named object you expected
 
 summary(fit)
+sanity(fit)
 
 ```
+#### 5.4.1 Try extra optimization
+```{r}
+fit_nb2_full <- fit 
+
+fit_nb2_full_extra <- run_extra_optimization(fit_nb2_full)
+
+sanity(fit_nb2_full_extra)
+max(abs(fit_nb2_full_extra$sd_report$gradient.fixed), na.rm = TRUE)
+
+```
+#### 5.4.2 Which parameter is causing the residual gradient?
+```{r}
+fit_nb2_full_extra$sd_report$gradient.fixed
+
+sort(abs(fit_nb2_full_extra$sd_report$gradient.fixed), decreasing = TRUE)
+
+```
+If this were ecology (fish stock assessment):
+
+→ reviewers accept gradients < 0.01
+
+If this were epidemiology / applied ML / public health:
+
+→ gradients < 0.005 are often accepted
+→ especially with spatial models
+
+If this were statistics / econometrics journal:
+
+→ they expect gradients < 0.001
+→ but you can still justify your model with:
+
+sanity() output
+
+residual diagnostics
+
+AIC
+
+robustness checks with simpler models
+
+#### 5.4.3 For Model 38 NB2_spON_AR1_form_ERxOpioidSES.Time
+```{r}
+# Find the row for the combo
+
+family.select = "NB2"  # Replace with "Poisson", "NB1", "NB2"
+spatial.select = "on"      # Replace with "on", "off"
+spatiotemporla.select = "ar1"     # Replace with "off", "iid", "ar1"
+form.select = "form_ERxOpioidSES.Time"                  #"form",  "form.er",  "form.er.cov",  "form.inter.cov",   "form.er.spline",  "form.er.cov.spline",  "form.inter.cov.spline"
+
+
+
+idx <- with(aic_table, which(family == family.select & 
+                               spatial == spatial.select & 
+                               spatiotemporal == spatiotemporla.select &
+                               form == form.select))
+
+stopifnot(length(idx) == 1)          # ensure it exists uniquely
+fit <- fits[[idx]]      # create the named object you expected
+
+summary(fit)
+sanity(fit)
+
+```
+
+
+Model 29 Poisson_spON_OFF_form_ERxOpioidSES.Time (AIC = 417.5) ***
+Model 32 Poisson_spON_OFF_form_ERxOpioidSES.Time (AIC = 419.5)
+Model 38 NB2_spON_AR1_form_ERxOpioidSES.Time (AIC = 423.5) 
+
+Model 29 Poisson_spON_OFF_form_ERxOpioidSES.Time (AIC = 417.5)
+A spatial Poisson regression with a linear temporal trend and ER × opioid × SES interactions was selected as the primary model based on AIC, diagnostic plots, and convergence criteria. More complex negative binomial and spatiotemporal models provided identical fixed-effect estimates but showed unnecessary overparameterization.
+
+Model 38 NB2_spON_AR1_form_ERxOpioidSES.Time (AIC = 423.5) [robustness check]
+We fit a negative binomial spatiotemporal model with spatial random effects and AR1 correlation. The estimated dispersion parameter was extremely large and the spatiotemporal variance collapsed to ≈0, indicating that a simpler spatial Poisson model provided an adequate fit. Results were virtually identical under both specifications; we report the spatial model with linear time and ER×opioid×SES interactions.
+
 
 ```{r}
-# sanity(fit)
+mname <- aic_table_coef$model[which.min(aic_table_coef$AIC)]
+fit   <- fits[[mname]]
+
+set.seed(123)
+sims <- simulate(fit, nsim = 250, type = "mle-mvn")
+
+# Option 1: get DHARMa object directly
+dh <- sdmTMB::dharma_residuals(
+  simulated_response = sims,
+  object             = fit,
+  plot               = FALSE,
+  return_DHARMa      = TRUE
+)
+
+plot(dh)                         # DHARMa default diagnostic plot
+DHARMa::testDispersion(dh)
+DHARMa::testUniformity(dh)
+DHARMa::testZeroInflation(dh)
+
 ```
+
+
+
+### 5.4.1 Explore Selected Four Models in Last Week [New]
+```{r}
+# Define the model names you want
+model_names <- c(
+  "Poisson_spOFF_OFF_form_ER",
+  "Poisson_spOFF_OFF_form_ERxOpioid.SES",
+  "Poisson_spOFF_OFF_form_ERxOpioid.SES",
+  "Poisson_spON_OFF_form_ERxOpioid.SES"
+)
+
+
+# Check which exist in the fits list
+model_names <- model_names[model_names %in% names(fits)]
+
+# Extract coefficients for each
+coef_list <- lapply(model_names, function(m) {
+  fit_i <- fits[[m]]
+  if (inherits(fit_i, "sdmTMB")) {
+    coefs <- broom::tidy(fit_i)
+    coefs$model <- m
+    coefs
+  } else {
+    warning(sprintf("Model %s not found or invalid.", m))
+    NULL
+  }
+})
+
+# Combine into one table
+coef_table <- dplyr::bind_rows(coef_list)
+
+print(coef_table)
+
+
+#write.csv(coef_table, "output/coef_table.csv")
+
+```
+
+In 1st and 10 24 27 model, we created coef tables for each, and found that No coef is significant.
+
+
+```{r}
+summary(fit)$coefficients
+car::vif(fit)  # for multicollinearity
+
+```
+The Variance Inflation Factor quantifies how much a predictor’s variance is inflated due to multicollinearity with other predictors.
+
+
+ is the R² when variable j is regressed on all the others.
+All VIFs are below 5 — acceptable multicollinearity. No need to drop predictors, though disability_rate_z shows some overlap with other socioeconomic indicators.
+
 
 
 ```{r}
@@ -885,128 +1484,98 @@ testTemporalAutocorrelation(res, time = df$time_arg)  # optional, if you have ti
 
 ```
 
-
-### 5.4 Curvature Diagnostics.
+## 6 PCA Method [New]
+### 6.1 Build composite indices (PCA)
 ```{r}
-drug_terms <- grep(
-  "OXYCODONE_annual_percapita_z|HYDROCODONE_annual_percapita_z|BUPRENORPHINE_annual_percapita_z|METHADONE_annual_percapita_z",
-  names(fit$sd_report$par.fixed),
-  value = TRUE
-)
+# ---- choose variables ----
+opioid_vars <- c("OXYCODONE_annual_percapita",
+                 "HYDROCODONE_annual_percapita",
+                 "BUPRENORPHINE_annual_percapita",
+                 "METHADONE_annual_percapita")
 
+ses_vars <- c("poverty_rate", "disability_rate", "noinsurance_rate",
+              "unemployee_rate", "gini_index")
 
-demo_terms <- grep("unemploy|gini|poverty|disability|noinsurance", names(fit$sd_report$par.fixed), value = TRUE)
+# Ensure numeric and drop rows with all-NA in a block
+X_opioid <- df %>% select(all_of(opioid_vars)) %>% mutate(across(everything(), as.numeric))
+X_ses    <- df %>% select(all_of(ses_vars))    %>% mutate(across(everything(), as.numeric))
 
+# ---- PCA (columns standardized automatically with scale.=TRUE) ----
+pca_opioid <- prcomp(na.omit(X_opioid), scale. = TRUE)
+pca_ses    <- prcomp(na.omit(X_ses),    scale. = TRUE)
 
-vcov_mat <- fit$sd_report$cov.fixed
+# helper to project with NA handling
+project_pc1 <- function(X, pca){
+  # center/scale with training means/sds from prcomp
+  Xcs <- sweep(X, 2, pca$center, "-")
+  Xcs <- sweep(Xcs, 2, pca$scale,  "/")
+  # PC1 scores (first loading vector)
+  as.numeric(as.matrix(Xcs) %*% pca$rotation[,1])
+}
 
-
-
-# define the covariance / Hessian
-vcov_mat <- fit$sd_report$cov.fixed
-
-# identify variable positions by name pattern
-drug_idx <- grepl("OXYCODONE|HYDROCODONE|BUPRENORPHINE|METHADONE", Xnames, ignore.case = TRUE)
-demo_idx <- grepl("unemploy|gini|poverty|disabil|noinsurance", Xnames, ignore.case = TRUE)
-
-# extract the relevant sub-matrices
-H_drug <- vcov_mat[drug_idx, drug_idx, drop = FALSE]
-H_demo <- vcov_mat[demo_idx, demo_idx, drop = FALSE]
-
-# curvature / conditioning tests
-eig_drug <- eigen(H_drug, symmetric = TRUE)$values
-eig_demo <- eigen(H_demo, symmetric = TRUE)$values
-eig_drug
-eig_demo
-
-```
-
-```{r}
-# Compute condition numbers for text output
-cond_drug <- max(eig_drug) / min(eig_drug)
-cond_demo <- max(eig_demo) / min(eig_demo)
-cat("Condition number (Drug block):", round(cond_drug, 2), "\n")
-cat("Condition number (Demographic block):", round(cond_demo, 2), "\n")
-```
-Condition number	Level	Interpretation
-< 10	Low	Predictors are well-conditioned
-10–30	Moderate	Some collinearity, but manageable
-> 30	High	Multicollinearity could inflate SEs and destabilize estimates
-> 100	Severe	Results likely unreliable; recheck variable scaling or redundancy
-
-The condition number for the drug block was 20.20, and for the demographic block 25.44, both within the range typically interpreted as indicating moderate collinearity (values < 30 are generally acceptable). These results suggest that while some interdependence exists among predictors—particularly within the demographic variables such as poverty rate, unemployment rate, and disability rate—the degree of multicollinearity is not severe and unlikely to compromise the stability or interpretability of the model estimates.
-
-
-#### Visulization
-```{r}
-curv_df <- data.frame(
-  Eigenvalue = c(eig_drug, eig_demo),
-  Index = c(seq_along(eig_drug), seq_along(eig_demo)),
-  Block = rep(c("Drug predictors", "Demographic predictors"),
-              times = c(length(eig_drug), length(eig_demo)))
-)
-
-ggplot(curv_df, aes(x = Index, y = Eigenvalue, color = Block)) +
-  geom_point(size = 3) +
-  geom_line(linewidth = 0.8) +
-  scale_y_log10() +
-  scale_x_continuous(breaks = 1:max(curv_df$Index)) +
-  labs(
-    title = "Eigenvalue Spectrum (Curvature Test)",
-    subtitle = "Ordered eigenvalues of fixed-effect covariance matrix (log scale)",
-    x = "Eigenvalue Index (λ1 … λn)",
-    y = "Eigenvalue (log scale)",
-    color = "Block"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    legend.position = "top",
-    panel.grid.minor = element_blank()
+# add indices to df (aligned by row order; if NA rows exist, PC1 will be NA)
+df <- df %>%
+  mutate(
+    Opioid_Index   = project_pc1(select(., all_of(opioid_vars)), pca_opioid),
+    SES_Index      = project_pc1(select(., all_of(ses_vars)),    pca_ses)
+  ) %>%
+  # z-standardize indices for interpretability
+  mutate(
+    Opioid_Index_z = as.numeric(scale(Opioid_Index)),
+    SES_Index_z    = as.numeric(scale(SES_Index)),
+    ER_annual_percapita_z = as.numeric(scale(ER_annual_percapita))
   )
 
+# (optional) flip signs so “higher = worse” if desired
+if (cor(df$Opioid_Index_z, df$OXYCODONE_annual_percapita, use="pair") < 0) {
+  df$Opioid_Index_z <- -df$Opioid_Index_z
+}
+if (cor(df$SES_Index_z, df$poverty_rate, use="pair") < 0) {
+  df$SES_Index_z <- -df$SES_Index_z
+}
 
 ```
-Here, both spectra decline smoothly without collapsing toward zero, suggesting that parameters are distinguishable and the model is numerically stable.
-The Demographic block (red) shows slightly smaller eigenvalues overall and a steeper drop-off than the Drug block, implying moderate multicollinearity among demographic predictors (e.g., poverty, unemployment, disability), whereas the Drug block exhibits mild correlation but better conditioning.
-In practical terms, both groups remain within an acceptable range (condition numbers ≈20–25), meaning the model’s fixed-effect estimates are reliable and not severely inflated by multicollinearity.
-
-#### overall curvature
+#### 6.1.1 Dectect which varible is the most important
 ```{r}
-# Extract full covariance matrix from fit
-V_all <- fit$sd_report$cov.fixed  # same as vcov(fit) if available
+# Loadings (weights) for PC1 in each PCA
+round(pca_opioid$rotation[, 1, drop = FALSE], 3)
+round(pca_ses$rotation[, 1, drop = FALSE], 3)
 
-# Compute eigenvalues of the full matrix
-eig_all <- eigen(V_all, symmetric = TRUE)$values
+sort(abs(pca_opioid$rotation[, 1]), decreasing = TRUE)
+```
 
-# Report min/max and condition number
-cat("Global curvature check:\n")
-cat("Min eigenvalue:", min(eig_all), "\n")
-cat("Max eigenvalue:", max(eig_all), "\n")
-cat("Condition number:", max(eig_all) / min(eig_all), "\n")
 
-# Optional visualization (scree plot)
-df_all <- data.frame(Index = seq_along(eig_all), Eigenvalue = eig_all)
-
-ggplot(df_all, aes(x = Index, y = Eigenvalue)) +
-  geom_point(size = 2) +
-  geom_line() +
-  scale_y_log10() +
-  labs(
-    title = "Global Eigenvalue Spectrum of Fixed-Effect Covariance",
-    subtitle = "Curvature across all predictors combined",
-    x = "Eigenvalue Index (λ₁ … λₙ)",
-    y = "Eigenvalue (log scale)"
-  ) +
-  theme_minimal(base_size = 13)
+```{r}
+sort(abs(pca_ses$rotation[, 1]), decreasing = TRUE)
 
 ```
-Global Curvature Diagnostics.
-The eigenvalue spectrum of the fixed-effect covariance matrix revealed a smooth, monotonic decay spanning approximately three orders of magnitude (Figure X).
-All eigenvalues were positive, indicating a convex log-likelihood surface and stable optimization.
-The condition number of the full Hessian (≈ 10²–10³) was well within acceptable limits, confirming that all predictors were jointly identifiable and that the estimation surface exhibited no numerical instability.
-Together with blockwise curvature results, this analysis supports the reliability and well-conditioning of the final NB2 model.
 
 
+### 6.2 Fit a simpler NB2 model with the key interaction
+```{r}
+
+form_nb <- as.formula(
+  Deaths_em ~ ER_annual_percapita_z * Opioid_Index_z * SES_Index_z + year
+  # If your DV is a *rate*: use Deaths_em_rate ~ ... (and remove offset below)
+)
+
+fit_nb <- sdmTMB(
+  formula = form_nb,
+  data = df,
+  mesh = mesh,
+  family = nbinom2(link = "log"),
+  spatial = "on",            # or "off" if you prefer
+  spatiotemporal = "ar1",    # try "ar1" later if needed
+  time = "time_index",               # or "time_index" when using spatiotemporal != "off"
+  offset = df$log_pop,       # <— keep only if DV is a *count*
+  control = sdmTMBcontrol(newton_loops = 3)
+)
+
+summary(fit_nb)
+
+```
+
+## 10 Archived
 ### 5.6 Hurdle [Not work]
 ```{r}
 # fit_delta <- sdmTMB(
@@ -1163,154 +1732,3 @@ boxplot(resid ~ time_index, data=df)
 ```
 
 
-### [To-do] 5.8 Visualize Spatial & Spatiotemporal Effects
-```{r fig.width=10}
-
-
-```
-
-## 4. Correlation of Predictors
-
-### 4.1 Select Predictors
-```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
-
-
-df_cor <- df_imputated%>%
-  select(
-    County,
-    year,
-    pop_CDC,
-    # Deaths
-    Deaths,
-    Deaths_1,
-    Deaths_5,
-    Deaths_9,
-    Deaths_em,
-    # ER visit
-    ER_annual_percapita,
-    # Drugs
-    OXYCODONE_annual_percapita,	HYDROCODONE_annual_percapita,	BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
-
-    # ACS
-    unemployee_rate,	gini_index,	poverty_rate,	disability_rate, noinsurance_rate
-    )
-
-```
-
-### 4.2 Data Standardization
-```{r}
-
-#Choose Death from Deaths, Deaths_rate, Deaths_1, Death_5, Death_9, Death_em
-# Death_select <- "Deaths_em"
-Death_select <- c("Deaths","Deaths_1", "Deaths_5", "Deaths_9","Deaths_em")
-
-scale_vars <-  c(
-    # Deaths
-#######################################################  
-    
-    #"Deaths"
-    Death_select,
-#######################################################    
-    # ER visit
-    "ER_annual_percapita",
-    # Drugs
-    "OXYCODONE_annual_percapita",	"HYDROCODONE_annual_percapita",	"BUPRENORPHINE_annual_percapita", "METHADONE_annual_percapita",
-
-    # ACS
-    "unemployee_rate",	"gini_index",	"poverty_rate",	"disability_rate", "noinsurance_rate"
-    )
-
-df_cor_rate <- df_cor %>%
-  mutate(Deaths_rate = Deaths / pop_CDC)%>%
-  mutate(Deaths_1_rate = Deaths_1 / pop_CDC)%>% 
-  mutate(Deaths_5_rate = Deaths_5 / pop_CDC)%>%  
-  mutate(Deaths_9_rate = Deaths_9 / pop_CDC)%>%  
-  mutate(Deaths_em_rate = Deaths_em / pop_CDC)%>%  
-  mutate(across(all_of(scale_vars), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
-
-
-df_cor_rate_only_cor <- df_cor_rate %>%
-  select(-c("County","year","pop_CDC"))%>%
-  select(-all_of(scale_vars)) 
-```
-
-
-```{r}
-p_heat <- ggcorr(
-  df_cor_rate_only_cor ,
-  method = c("pairwise.complete.obs", "pearson"),
-  label = TRUE, label_size = 3, hjust = 0.9, layout.exp = 1
-) + theme_minimal(base_size = 10)
-print(p_heat)
-
-```
-
-
-```{r , message=FALSE, warning=FALSE}
-p_pairs <- ggpairs(
-  df_cor_rate,
-  upper = list(continuous = wrap("cor", use = "pairwise.complete.obs", size = 3)),
-  lower = list(continuous = wrap("points", alpha = 0.4, size = 0.7)),
-  diag  = list(continuous = wrap("densityDiag", alpha = 0.6))
-) +
-  theme(
-    axis.text  = element_text(size = 7),
-    strip.text = element_text(size = 8)
-  )
-
-print(p_pairs)
-```
-### 4.3 ER Visit and Death
-```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
-ggplot(df_cor_rate, aes(ER_annual_percapita_z, Deaths)) +
-  geom_point(aes(color = County)) +
-  geom_smooth(method = "lm", se = FALSE) +
-  labs(x = "ER visits", y = "Deaths")
-
-```
-### 4.4 Drugs and Death
-
-#### 4.4.1 Oxycodone and Death
-```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
-ggplot(df_cor_rate, aes(OXYCODONE_annual_percapita_z, Deaths)) +
-  geom_point(aes(color = County)) +
-  geom_smooth(method = "lm", se = FALSE) +
-  labs(x = "OXYCODONE consumption", y = "Deaths")
-
-```
-#### 4.4.2 Hydrocodone Visit and Death
-```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
-ggplot(df_cor_rate, aes(HYDROCODONE_annual_percapita_z, Deaths)) +
-  geom_point(aes(color = County)) +
-  geom_smooth(method = "lm", se = FALSE) +
-  labs(x = "HYDROCODONE consumption", y = "Deaths")
-```
-#### 4.4.3 Buprenorphine and Death
-```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
-ggplot(df_cor_rate, aes(BUPRENORPHINE_annual_percapita_z, Deaths)) +
-  geom_point(aes(color = County)) +
-  geom_smooth(method = "lm", se = FALSE) +
-  labs(x = "BUPRENORPHINE consumption", y = "Deaths")
-```
-#### 4.4.4 Methadone and Death
-```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
-ggplot(df_cor_rate, aes(METHADONE_annual_percapita_z, Deaths)) +
-  geom_point(aes(color = County)) +
-  geom_smooth(method = "lm", se = FALSE) +
-  labs(x = "METHADONE consumption", y = "Deaths")
-```
-
-### 4.5 Gini Index and Deaths
-```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
-ggplot(df_cor_rate, aes(gini_index_z, Deaths_em)) +
-  geom_point(aes(color = County)) +
-  geom_smooth(method = "lm", se = FALSE) +
-  labs(x = "Gini Index", y = "Deaths")
-```
-### 4.7 Disability and Deaths
-```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
-ggplot(df_cor_rate, aes(disability_rate_z, Deaths_em)) +
-  geom_point(aes(color = County)) +
-  geom_smooth(method = "lm", se = FALSE) +
-  labs(x = "Disability", y = "Deaths")
-```
