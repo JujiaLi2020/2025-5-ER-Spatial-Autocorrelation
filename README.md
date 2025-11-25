@@ -123,15 +123,11 @@ DT
 
 ## Update Log
 
-See the full log here:
-
-# Update Log
-
 A chronological summary of all modeling updates, decisions, and analysis progress.
 
 ---
 
-## Table of Contents
+### Table of Contents
 - [2025-11-17 — Rural/Urban and Interaction Models](#2025-11-17--ruralurban-and-interaction-models)
 - [2025-11-12 — Final Poisson Model Set](#2025-11-12--final-poisson-model-set)
 - [2025-11-03 — Coefficients and Diagnostics](#2025-11-03--coefficients-and-diagnostics)
@@ -151,7 +147,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-11-17 — Rural/Urban and Interaction Models
+### 2025-11-17 — Rural/Urban and Interaction Models
 - Added URcode (rural–urban continuum classification).
 - Integrated rural/urban grouping into ER, drug, and SES modeling.
 - Built ER-only, ER+covariate, ER+drug, ER×drug, and ER×SES interaction models.
@@ -160,7 +156,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-11-12 — Final Poisson Model Set
+### 2025-11-12 — Final Poisson Model Set
 **Models retained:**
 - Model 1: `Poisson_spOFF_OFF_form.er`
 - Model 10: `Poisson_spOFF_OFF_form.er.cov`
@@ -174,14 +170,14 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-11-03 — Coefficients and Diagnostics
+### 2025-11-03 — Coefficients and Diagnostics
 - Retained coefficient tables for Models 1, 10, 24, 27.
 - Stored DHARMa residual diagnostics for key models.
 - Added heatmaps for deaths, buprenorphine, and methadone consumption trends.
 
 ---
 
-## 2025-10-20 — EM Algorithm and PCA
+### 2025-10-20 — EM Algorithm and PCA
 - Implemented EM-based two-hurdle Poisson models for ER, oxycodone, and buprenorphine.
 - Constructed PCA predictors (retain 80–90% variance).
 - Developed backward-stepwise comparison tables for EM-based models.
@@ -189,7 +185,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-10-06 — Death Rate and Curvature Tests
+### 2025-10-06 — Death Rate and Curvature Tests
 - Switched main outcome to death rate (instead of raw counts).
 - Tested curvature for:
   - ER rate
@@ -199,7 +195,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-09-22 — Illegal Drug Detection Discussion
+### 2025-09-22 — Illegal Drug Detection Discussion
 - Explored whether illegal drug supply trends can be inferred from ER spikes.
 - Tested annual-level ER × drug models.
 - Investigated seasonality using Haar and Fourier transforms.
@@ -208,7 +204,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-09-08 — Spatiotemporal Modeling
+### 2025-09-08 — Spatiotemporal Modeling
 - Evaluated NB1/AR1 structures with and without random effects.
 - Compared ER-rate, ACS predictor sets, and offset-based models.
 - Ran MICE imputation for death suppression scenarios.
@@ -216,7 +212,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-08-25 — Table and Hotspot Revisions
+### 2025-08-25 — Table and Hotspot Revisions
 - Verified Table 1 (corrections to per-capita and per-million rates).
 - Rechecked Figure 20 spatial hotspots.
 - Updated regression model specifications for MME consumption.
@@ -224,14 +220,14 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-08-12 — Interaction Discussion
+### 2025-08-12 — Interaction Discussion
 - Added GLMM-based interaction terms.
 - Identified need for a small health dataset (~100 samples) for EM tutorial.
 - Explored UCI datasets as potential demonstration datasets.
 
 ---
 
-## 2025-08-11 — Major Revision
+### 2025-08-11 — Major Revision
 - Updated Table 1: mid-year rate per million population.
 - Added drug consumption tables (Tables 2–5).
 - Integrated `tigris` for obtaining county geometries.
@@ -242,7 +238,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-07-22 — Spatial and Temporal Modeling Guidance
+### 2025-07-22 — Spatial and Temporal Modeling Guidance
 - Confirmed negative binomial (`nbinom2`) provides best ER fit.
 - Best GLMM: random intercept + random slope (year).
 - Verified offset(log(population)).
@@ -255,7 +251,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-07-21 — Mid-Summer Updates
+### 2025-07-21 — Mid-Summer Updates
 - Corrected Table 1 structural inconsistencies.
 - Combined multi-drug figures for easier cross-comparison.
 - Added MME (per capita) figures.
@@ -263,7 +259,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-07-08 — Quarterly Update
+### 2025-07-08 — Quarterly Update
 - Added quarterly ER visit analysis.
 - Updated four-medication figures.
 - Applied Moran’s I to ER and medication trends.
@@ -271,19 +267,19 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 
 ---
 
-## 2025-06-26 — Method
+### 2025-06-26 — Method
 
 
 ---
 
-# Important Data Links
+## Important Data Links
 
 This project integrates ER visits, opioid consumption, socioeconomic, and geographic data from multiple public sources.  
 Below is a comprehensive list of all key datasets used in the workflow.
 
 ---
 
-## Emergency Department (ER) Data
+### Emergency Department (ER) Data
 - Alabama Department of Public Health: Opioid Overdose ER Visits  
   https://www.alabamapublichealth.gov/opioids/
 
@@ -292,7 +288,7 @@ Below is a comprehensive list of all key datasets used in the workflow.
 
 ---
 
-## Mortality / Death Count Data
+### Mortality / Death Count Data
 - CDC WONDER: Multiple Cause of Death  
   https://wonder.cdc.gov/mcd.html
 
@@ -301,7 +297,7 @@ Below is a comprehensive list of all key datasets used in the workflow.
 
 ---
 
-## Opioid Prescription / Consumption Data
+### Opioid Prescription / Consumption Data
 - ARCOS (DEA):  
   https://www.deadiversion.usdoj.gov/arcos/
 
@@ -313,7 +309,7 @@ Below is a comprehensive list of all key datasets used in the workflow.
 
 ---
 
-## Socioeconomic & Demographic Data (SES Variables)
+### Socioeconomic & Demographic Data (SES Variables)
 - U.S. Census American Community Survey (ACS)  
   https://data.census.gov/
 
@@ -325,7 +321,7 @@ Below is a comprehensive list of all key datasets used in the workflow.
 
 ---
 
-## Rural–Urban Classification
+### Rural–Urban Classification
 - USDA Rural–Urban Continuum Codes (RUCC)  
   https://www.ers.usda.gov/data-products/rural-urban-continuum-codes/
 
@@ -334,7 +330,7 @@ Below is a comprehensive list of all key datasets used in the workflow.
 
 ---
 
-## Geographic Boundaries / Shapefiles
+### Geographic Boundaries / Shapefiles
 - TIGER/Line Shapefiles (Counties)  
   https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html
 
@@ -346,7 +342,7 @@ Below is a comprehensive list of all key datasets used in the workflow.
 
 ---
 
-## Substance Use & Public Health Background Reports
+### Substance Use & Public Health Background Reports
 - JAMA Study Referenced (ER–Death correlation)  
   https://jamanetwork.com/journals/jamanetworkopen/fullarticle/2794462
 
