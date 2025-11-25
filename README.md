@@ -1,147 +1,287 @@
-🧮 Opioid ER–Death Spatiotemporal Modeling Project
-Alabama Counties, 2016–2019
-1. Overview
+# Opioid ER–Death Spatiotemporal Modeling Template
+
+This repository provides a full modeling framework for analyzing the relationship between **opioid overdose ER visits**, **opioid overdose deaths**, **drug consumption**, and **socioeconomic factors** using:
 
-This project analyzes the relationship between:
-Opioid overdose ER visits
-Opioid overdose deaths
-Four opioid medications (Oxycodone, Hydrocodone, Buprenorphine, Methadone)
-Socioeconomic conditions (SES)
-Urban–rural classifications
-Spatial and temporal structure
-It aims to identify when and why the ER–death relationship becomes negative, a key scientific finding and publication requirement.
+- Generalized Linear Mixed Models (GLMM)
+- Spatiotemporal models via `sdmTMB`
+- ER × Drug and ER × SES interaction models
+- PCA-based dimension reduction
+- EM-based modeling for suppressed CDC death data
+- A Shiny dashboard for model comparison
 
+![Example visualization](./static/example_plot.png)
 
-2. Update Log (Highly Readable Format)
+---
 
-Tip: This structure fits GitHub’s monospace blocks and indentation perfectly.
+## What it does
 
-🗓️ 2025-11-17
+The modeling system:
+
+1. Takes county-level ER, death, drug, and SES inputs  
+2. Standardizes variables and builds PCA indices  
+3. Fits GLMM and spatiotemporal models  
+4. Adds ER × Drug, ER × SES, and ER × Rural/Urban interactions  
+5. Runs diagnostics (AIC, DHARMa, hotspot maps)  
+6. Detects when the ER–death relationship becomes negative  
+7. Provides an interactive Shiny dashboard for exploration  
 
-Added URcode (Rural/Urban continuum)
+---
 
-Built ER-only, ER+cov, ER+drug, ER×drug, ER×SES models
+## Repository Structure
 
-Investigated negative ER–death correlation behavior
+```
+/data/           Input ER, death, drug, SES datasets
+/notebook/       R notebooks (.Rmd, .nb.html)
+/scripts/        Core modeling scripts
+/models/         Saved sdmTMB and GLMM model objects
+/shiny/          Shiny dashboard
+/static/         Images
+README.md        Documentation
+update_log.md    Full chronological update log
+```
 
-🗓️ 2025-11-12
+---
 
-Finalized 4 Poisson models
+## Key Components
+
+### 1. PCA (Drug & SES)
+- `Opioid_Index_z` derived from OXY/HYDRO/BUPRE/METH
+- `SES_Index_z` derived from poverty/unemployment/disability/etc.
+- Reduces multicollinearity
+- Provides loading tables for interpretation
+
+### 2. GLMM Models
+- Families: `poisson()`, `nbinom2()`, `tweedie()`
+- Offsets: `offset(log(population))`
+- Includes splines:  
+  ```r
+  s(time_index, k = 4)
+  ```
+
+### 3. Spatiotemporal Models (`sdmTMB`)
+- Spatial = "on" | "off"
+- Spatiotemporal = "off" | "iid" | "ar1" | "rw"
+- 5 km mesh cutoff
+
+### 4. Interaction Models
+Examples:
+```r
+ER * (OXY + HYDRO + BUPRE + METH)
+ER * (poverty + gini + unemployee)
+ER * URcode
+```
+
+### 5. EM Algorithm for Suppressed Data
+Handles CDC suppressed values (0–9):
+- Two-hurdle Poisson
+- Iterative imputation
+- Refit GLMMs on completed dataset
+
+---
+
+## Getting Started
+
+Clone the repository:
+
+```bash
+git clone https://github.com/<yourname>/<repo>.git
+cd <repo>
+```
+
+Run the Shiny app:
+
+```r
+shiny::runApp("shiny")
+```
+
+Copy environment file if needed:
+
+```bash
+cp .env.example .env
+```
+
+---
+
+## Requirements
+
+```txt
+R >= 4.2
+
+tidyverse
+sdmTMB
+glmmTMB
+DHARMa
+mgcv
+tigris
+sf
+FactoMineR
+shiny
+DT
+```
+
+---
+
+## Update Log
+
+See the full log here:
+
+# Update Log
+
+A chronological summary of all modeling updates, decisions, and analysis progress.
+
+---
+
+## Table of Contents
+- [2025-11-17 — Rural/Urban and Interaction Models](#2025-11-17--ruralurban-and-interaction-models)
+- [2025-11-12 — Final Poisson Model Set](#2025-11-12--final-poisson-model-set)
+- [2025-11-03 — Coefficients and Diagnostics](#2025-11-03--coefficients-and-diagnostics)
+- [2025-10-20 — EM Algorithm and PCA](#2025-10-20--em-algorithm-and-pca)
+- [2025-10-06 — Death Rate and Curvature Tests](#2025-10-06--death-rate-and-curvature-tests)
+- [2025-09-22 — Illegal Drug Detection Discussion](#2025-09-22--illegal-drug-detection-discussion)
+- [2025-09-08 — Spatiotemporal Modeling](#2025-09-08--spatiotemporal-modeling)
+- [2025-08-25 — Table and Hotspot Revisions](#2025-08-25--table-and-hotspot-revisions)
+- [2025-08-12 — Interaction Discussion](#2025-08-12--interaction-discussion)
+- [2025-08-11 — Major Revision](#2025-08-11--major-revision)
+- [2025-07-22 — Spatial and Temporal Modeling Guidance](#2025-07-22--spatial-and-temporal-modeling-guidance)
+- [2025-07-21 — Mid-Summer Updates](#2025-07-21--mid-summer-updates)
+- [2025-07-08 — Quarterly Update](#2025-07-08--quarterly-update)
+- [2025-06-26 — Methods Planning](#2025-06-26--methods-planning)
+- [2025-06-24 — County Trends](#2025-06-24--county-trends)
+- [2025-06-10 — Project Kickoff](#2025-06-10--project-kickoff)
+
+---
+
+## 2025-11-17 — Rural/Urban and Interaction Models
+- Added URcode (rural–urban continuum classification).
+- Integrated rural/urban grouping into ER, drug, and SES modeling.
+- Built ER-only, ER+covariate, ER+drug, ER×drug, and ER×SES interaction models.
+- Investigated conditions where ER–death correlation becomes negative.
+- Prepared interaction structures for spline and EM-based models.
+
+---
+
+## 2025-11-12 — Final Poisson Model Set
+**Models retained:**
+- Model 1: `Poisson_spOFF_OFF_form.er`
+- Model 10: `Poisson_spOFF_OFF_form.er.cov`
+- Model 24: `Poisson_spOFF_OFF_form.inter.cov`
+- Model 27: `Poisson_spON_OFF_form.inter.cov`
+
+**Additional notes:**
+- Identified time windows where the ER–death relationship reverses.
+- Outlined additional models using spline(year) and interaction terms.
+- Prepared AIC and coefficient comparison structure for EM algorithm integration.
+
+---
+
+## 2025-11-03 — Coefficients and Diagnostics
+- Retained coefficient tables for Models 1, 10, 24, 27.
+- Stored DHARMa residual diagnostics for key models.
+- Added heatmaps for deaths, buprenorphine, and methadone consumption trends.
+
+---
+
+## 2025-10-20 — EM Algorithm and PCA
+- Implemented EM-based two-hurdle Poisson models for ER, oxycodone, and buprenorphine.
+- Constructed PCA predictors (retain 80–90% variance).
+- Developed backward-stepwise comparison tables for EM-based models.
+- Prepared full ER–drug–SES interaction models for imputed data.
+
+---
+
+## 2025-10-06 — Death Rate and Curvature Tests
+- Switched main outcome to death rate (instead of raw counts).
+- Tested curvature for:
+  - ER rate
+  - Four opioids
+  - SES variables
+- Prepared MICE imputation strategies for suppressed CDC death counts.
+
+---
+
+## 2025-09-22 — Illegal Drug Detection Discussion
+- Explored whether illegal drug supply trends can be inferred from ER spikes.
+- Tested annual-level ER × drug models.
+- Investigated seasonality using Haar and Fourier transforms.
+- Considered integrating ACS demographic variables.
+- Began constructing spatiotemporal death models with MICE and EM imputations.
+
+---
+
+## 2025-09-08 — Spatiotemporal Modeling
+- Evaluated NB1/AR1 structures with and without random effects.
+- Compared ER-rate, ACS predictor sets, and offset-based models.
+- Ran MICE imputation for death suppression scenarios.
+- Evaluated delta and zero-inflated model options using sdmTMB.
+
+---
+
+## 2025-08-25 — Table and Hotspot Revisions
+- Verified Table 1 (corrections to per-capita and per-million rates).
+- Rechecked Figure 20 spatial hotspots.
+- Updated regression model specifications for MME consumption.
+- Compared Poisson, NB2, and Gamma models for consumption and rates.
+
+---
+
+## 2025-08-12 — Interaction Discussion
+- Added GLMM-based interaction terms.
+- Identified need for a small health dataset (~100 samples) for EM tutorial.
+- Explored UCI datasets as potential demonstration datasets.
+
+---
+
+## 2025-08-11 — Major Revision
+- Updated Table 1: mid-year rate per million population.
+- Added drug consumption tables (Tables 2–5).
+- Integrated `tigris` for obtaining county geometries.
+- Compared GLMM vs spatial–spatiotemporal models.
+- Extracted county-level random effects.
+- Evaluated mesh with 5 km edge constraint.
+- Compared best GLMM and best sdmTMB models (AIC, predictions, variance).
+
+---
+
+## 2025-07-22 — Spatial and Temporal Modeling Guidance
+- Confirmed negative binomial (`nbinom2`) provides best ER fit.
+- Best GLMM: random intercept + random slope (year).
+- Verified offset(log(population)).
+- Evaluated temporal structures:
+  - `off`
+  - `iid`
+  - `ar1`
+  - `rw`
+- Suggested testing quadratic time term (`I(year_c^2)`).
+
+---
+
+## 2025-07-21 — Mid-Summer Updates
+- Corrected Table 1 structural inconsistencies.
+- Combined multi-drug figures for easier cross-comparison.
+- Added MME (per capita) figures.
+- Added spatiotemporal maps for ER and drug consumption patterns.
+
+---
+
+## 2025-07-08 — Quarterly Update
+- Added quarterly ER visit analysis.
+- Updated four-medication figures.
+- Applied Moran’s I to ER and medication trends.
+- Clarified methodology for medication comparison graphs.
+
+---
+
+## 2025-06-26 — Method
+
+
+---
+
+## Citation
+
+If you use this repository, please cite:
+
+```
+Li, J. (2025). Opioid ER–Death Spatiotemporal Modeling Framework.
+University of Alabama.
+```
 
-Established when ER–death flips sign
-
-🗓️ 2025-11-03
-
-Kept key coefficient tables + DHARMa results
-
-Added heatmaps: Death, Buprenorphine, Methadone
-
-🗓️ 2025-10-20
-
-EM-based two-hurdle Poisson implemented
-
-PCA 80–90% variance feature reduction
-
-Handling suppressed values (<1 or >9)
-
-🗓️ 2025-10-06
-
-Switched deaths → rates
-
-Added curvature tests (ER, drug)
-
-Evaluated MICE imputation
-
-🗓️ 2025-09-22
-
-Annual spatiotemporal death models
-
-Illegal drug signal exploration
-
-Fourier/Haar seasonality decomposition
-
-🗓️ 2025-09-08
-
-Hurdle model for ER visits
-
-Imputation for suppressed deaths
-
-Annual ER–drug–death relationships
-
-🗓️ 2025-08-12
-
-GLMM interaction plots
-
-Top-5 county comparison
-
-🗓️ 2025-08-11
-
-Revised Table 1
-
-Added Tables 2–5 (drug consumption)
-
-Added county mapping
-
-GLMM vs S–S comparison
-
-Mesh refinement completed
-
-🗓️ 2025-07-21
-
-Updated Table 1
-
-Added quarterly ER & drug figures
-
-Added annual medication consumption rates
-
-🗓️ 2025-07-08
-
-Moran’s I for ER & drugs
-
-Seasonal analysis
-
-Simplified figure set
-
-🗓️ 2025-06-26
-
-Began using sdmTMB for GLMM-like models
-
-🗓️ 2025-06-24
-
-Cleaned minor data issues
-
-Built four-drug northern county graphs
-
-🗓️ 2025-06-10
-
-Trend detection in Cherokee/Etowah/Jackson/Lauderdale
-
-Added Buprenorphine and other drug per capita trends
-
-🗓️ May 2025
-
-ANOVA-like summaries
-
-Outlier detection
-
-Moran’s I
-
-Temporal correlation
-
-6. Remaining Tasks
-
-Finalize S–S outputs
-
-Outlier fixes in S–S models
-
-Add ACS variables
-
-Expand ER × Drug × SES × URcode interactions
-
-Produce manuscript-ready tables & figures
-
-7. Helpful Links
-
-USDA Rural–Urban Codes: https://www.ers.usda.gov/data-products/rural-urban-continuum-codes
-
-CDC Urban–Rural Classification: https://www.cdc.gov/nchs/data-analysis-tools/urban-rural.html
