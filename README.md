@@ -139,7 +139,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 ---
 
 ### Table of Contents
-- [2025-11-30 — ER Model Integration Update](#2025-11-30 -- ER Model Integration Update)
+- [2025-11-30 — ER Model Integration Update](#2025-11-30--er-model-integration-update)
 - [2025-11-17 — Rural/Urban and Interaction Models](#2025-11-17--ruralurban-and-interaction-models)
 - [2025-11-12 — Final Poisson Model Set](#2025-11-12--final-poisson-model-set)
 - [2025-11-03 — Coefficients and Diagnostics](#2025-11-03--coefficients-and-diagnostics)
