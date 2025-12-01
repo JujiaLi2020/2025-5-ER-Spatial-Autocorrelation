@@ -22,6 +22,9 @@ Explore the interactive dashboard for model comparison, coefficient inspection, 
   <img src="https://img.shields.io/badge/Open%20Shiny%20App-Click%20Here-blue?style=for-the-badge" />
 </a>
 
+### Data  
+[Download full dataset (Data_all.csv)](../Data/Data_all.csv)
+
 ---
 
 ## What it does
@@ -139,6 +142,7 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 ---
 
 ### Table of Contents
+- [2025-11-30 — ER Model Integration Update](#2025-11-30--er-model-integration-update)
 - [2025-11-17 — Rural/Urban and Interaction Models](#2025-11-17--ruralurban-and-interaction-models)
 - [2025-11-12 — Final Poisson Model Set](#2025-11-12--final-poisson-model-set)
 - [2025-11-03 — Coefficients and Diagnostics](#2025-11-03--coefficients-and-diagnostics)
@@ -155,6 +159,16 @@ A chronological summary of all modeling updates, decisions, and analysis progres
 - [2025-06-26 — Methods Planning](#2025-06-26--methods-planning)
 - [2025-06-24 — County Trends](#2025-06-24--county-trends)
 - [2025-06-10 — Project Kickoff](#2025-06-10--project-kickoff)
+
+---
+
+### 2025-11-30 — ER Model Integration Update
+- Added support for a second model set (ER models) in the Shiny dashboard.
+- Implemented a new “Model Set” selector to switch between Deaths and ER models.
+- Loaded ER models safely using a separate environment (`new.env()`), preventing overwrites.
+- Added reactive data/model switching (`current_df`, `current_fits`, `current_aic_table`).
+- Updated all plots and outputs to work for both model sets automatically.
+- Fixed missing-object errors (`df_ER`, `fits_ER`) and improved overall app stability.
 
 ---
 
