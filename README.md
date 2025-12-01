@@ -22,6 +22,9 @@ Explore the interactive dashboard for model comparison, coefficient inspection, 
   <img src="https://img.shields.io/badge/Open%20Shiny%20App-Click%20Here-blue?style=for-the-badge" />
 </a>
 
+### Data  
+[Download full dataset (Data_all.csv)](../Data/Data_all.csv)
+
 ---
 
 ## What it does
