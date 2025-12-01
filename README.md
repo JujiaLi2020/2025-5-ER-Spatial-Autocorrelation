@@ -23,7 +23,7 @@ Explore the interactive dashboard for model comparison, coefficient inspection, 
 </a>
 
 ### Data  
-[Download full dataset (Data_all.csv)](../Data/Data_all.csv)
+[Download full dataset (Data_all.csv)](/Data/Data_all.csv)
 
 ---
 
