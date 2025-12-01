@@ -11,47 +11,39 @@ library(DHARMa)
 
 # ------------------------------------------------------------------
 # Load pre-fitted objects:
-#   df               data frame with Deaths_em, ER_annual_percapita_z, time_index, etc.
-#   fits             named list of sdmTMB model objects
-#   aic_table_coef   AIC table with columns: model, AIC, DeltaAIC, coef_est, coef_se
+#   models.RData:   df, fits, aic_table_coef       (Deaths models)
+#   models_ER.RData: df_ER, fits_ER               (ER models)
+#   aic_table_coef_ER.rds: aic_table_coef_ER
 # ------------------------------------------------------------------
-load("models.RData")
+load("models.RData")          # df, fits, aic_table_coef
+load("models_ER.RData")       # df_ER, fits_ER  (adjust if different)
+aic_table_coef_ER <- readRDS("aic_table_coef_ER.rds")
 
 # sanity check (optional)
-stopifnot(exists("df"), exists("fits"), exists("aic_table_coef"))
-
-# pick default model: lowest AIC
-default_model <- aic_table_coef$model[which.min(aic_table_coef$AIC)]
-
-# baseline row for partial dependence + time trend:
-baseline_row <- df |>
-  summarise(
-    across(
-      where(is.numeric),
-      ~ median(.x, na.rm = TRUE)
-    ),
-    across(
-      where(\(x) !is.numeric(x)),
-      ~ dplyr::first(.x)
-    )
-  ) |>
-  slice(1)
-
+stopifnot(
+  exists("df"), exists("fits"), exists("aic_table_coef"),
+  exists("df"), exists("fits_ER"), exists("aic_table_coef_ER")
+)
 
 # ============================== UI =================================
 
 ui <- fluidPage(
-  titlePanel("Opioid ER–Death Spatial Models (sdmTMB)"),
+  titlePanel("Opioid ER–Death & ER Spatial Models (sdmTMB)"),
   
   sidebarLayout(
     sidebarPanel(
-      # model selector -------------------------------------------
+      # NEW: choose which model set to view -------------------------
       selectInput(
-        inputId  = "model_name",
-        label    = "Select model:",
-        choices  = aic_table_coef$model,
-        selected = default_model
+        inputId = "model_set",
+        label   = "Model set:",
+        choices = c("Deaths models" = "deaths",
+                    "ER models"     = "er"),
+        selected = "deaths"
       ),
+      
+      tags$hr(),
+      # model selector (built dynamically based on model_set) -------
+      uiOutput("model_dropdown"),
       
       tags$hr(),
       h4("Selected model info"),
@@ -72,7 +64,6 @@ ui <- fluidPage(
           "Model & diagnostics",
           h3("Model comparison table"),
           DTOutput("aic_tbl")
-          # model summary & residual plot removed from here
         ),
         
         tabPanel(
@@ -80,12 +71,12 @@ ui <- fluidPage(
           fluidRow(
             column(
               width = 6,
-              h3("ER → deaths (partial dependence)"),
+              h3("ER → outcome (partial dependence)"),
               plotOutput("er_pdp", height = "300px")
             ),
             column(
               width = 6,
-              h3("Temporal trend (predicted deaths by year)"),
+              h3("Temporal trend (predicted outcome by year)"),
               plotOutput("time_trend", height = "300px")
             )
           ),
@@ -93,7 +84,7 @@ ui <- fluidPage(
           fluidRow(
             column(
               width = 6,
-              h3("Observed vs predicted deaths"),
+              h3("Observed vs predicted"),
               plotOutput("fit_vs_obs", height = "300px")
             ),
             column(
@@ -121,10 +112,65 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   
+  # ---------- Reactives to switch between Deaths vs ER sets --------
+  current_aic_table <- reactive({
+    if (input$model_set == "deaths") {
+      aic_table_coef
+    } else {
+      aic_table_coef_ER
+    }
+  })
+  
+  current_fits <- reactive({
+    if (input$model_set == "deaths") {
+      fits
+    } else {
+      fits_ER
+    }
+  })
+  
+  current_df <- reactive({
+    if (input$model_set == "deaths") {
+      df
+    } else {
+      df
+    }
+  })
+  
+  baseline_row <- reactive({
+    df_now <- current_df()
+    df_now |>
+      summarise(
+        across(
+          where(is.numeric),
+          ~ median(.x, na.rm = TRUE)
+        ),
+        across(
+          where(\(x) !is.numeric(x)),
+          ~ dplyr::first(.x)
+        )
+      ) |>
+      slice(1)
+  })
+  
+  # -- dynamic model dropdown (depends on model_set) ----------------
+  output$model_dropdown <- renderUI({
+    at <- current_aic_table()
+    req(nrow(at) > 0)
+    default_model <- at$model[which.min(at$AIC)]
+    selectInput(
+      inputId  = "model_name",
+      label    = "Select model:",
+      choices  = at$model,
+      selected = default_model
+    )
+  })
+  
   # -- AIC table with clickable rows --------------------------------
   output$aic_tbl <- renderDT({
+    at <- current_aic_table()
     datatable(
-      aic_table_coef,
+      at,
       filter    = "top",
       selection = "single",
       options   = list(
@@ -136,9 +182,10 @@ server <- function(input, output, session) {
   
   # -- reactive: chosen model name (via table OR dropdown) ----------
   selected_model_name <- reactive({
+    at      <- current_aic_table()
     row_idx <- input$aic_tbl_rows_selected
-    if (!is.null(row_idx) && length(row_idx) == 1) {
-      aic_table_coef$model[row_idx]
+    if (!is.null(row_idx) && length(row_idx) == 1 && row_idx <= nrow(at)) {
+      at$model[row_idx]
     } else {
       input$model_name
     }
@@ -152,20 +199,23 @@ server <- function(input, output, session) {
   
   # -- lookup sdmTMB object -----------------------------------------
   selected_fit <- reactive({
-    fits[[selected_model_name()]]
+    current_fits()[[selected_model_name()]]
   })
   
   # -- compact info about AIC + ER coeff ----------------------------
   output$model_info <- renderText({
     mname <- selected_model_name()
-    row   <- aic_table_coef %>% filter(model == mname)
+    at    <- current_aic_table()
+    row   <- at %>% filter(model == mname)
     if (nrow(row) == 0) return("No model selected.")
     paste0(
       "Model: ", mname,
       "\nAIC: ", round(row$AIC, 2),
       "\nΔAIC: ", round(row$DeltaAIC, 2),
-      "\nER coef: ", row$coef_est,
-      " (SE = ", row$coef_se, ")"
+      if ("coef_est" %in% names(row)) {
+        paste0("\nER coef: ", row$coef_est,
+               " (SE = ", row$coef_se, ")")
+      } else ""
     )
   })
   
@@ -245,19 +295,21 @@ server <- function(input, output, session) {
     abline(h = 0, lty = 2)
   })
   
-  
   # -- ER partial dependence plot -----------------------------------
   output$er_pdp <- renderPlot({
     fit <- selected_fit()
     req(fit)
     
+    df_now <- current_df()
+    req("ER_annual_percapita_z" %in% names(df_now))
+    
     er_seq <- seq(
-      min(df$ER_annual_percapita_z, na.rm = TRUE),
-      max(df$ER_annual_percapita_z, na.rm = TRUE),
+      min(df_now$ER_annual_percapita_z, na.rm = TRUE),
+      max(df_now$ER_annual_percapita_z, na.rm = TRUE),
       length.out = 100
     )
     
-    newdat <- baseline_row[rep(1, length(er_seq)), ]
+    newdat <- baseline_row()[rep(1, length(er_seq)), ]
     newdat$ER_annual_percapita_z <- er_seq
     
     pred_df <- safe_predict(fit, newdata = newdat, type = "response", se_fit = TRUE)
@@ -275,23 +327,26 @@ server <- function(input, output, session) {
                   alpha = 0.2) +
       labs(
         x = "ER annual per capita (z-score)",
-        y = "Predicted deaths",
-        title = "ER → deaths (partial dependence)"
+        y = "Predicted response",
+        title = "ER → outcome (partial dependence)"
       ) +
       theme_minimal()
   })
   
   # -- Temporal trend plot ------------------------------------------
   output$time_trend <- renderPlot({
-    fit <- selected_fit()
+    fit   <- selected_fit()
     req(fit)
     
-    years <- sort(unique(df$year))
+    df_now <- current_df()
+    req("year" %in% names(df_now), "time_index" %in% names(df_now))
+    
+    years <- sort(unique(df_now$year))
     n     <- length(years)
     
-    newdat <- baseline_row[rep(1, n), ]
+    newdat <- baseline_row()[rep(1, n), ]
     newdat$year       <- years
-    newdat$time_index <- seq_len(n)  # adjust if your time column is different
+    newdat$time_index <- seq_len(n)  # adjust if your time coding differs
     
     pred_df <- safe_predict(fit, newdata = newdat, type = "response", se_fit = FALSE)
     
@@ -305,7 +360,7 @@ server <- function(input, output, session) {
       geom_point() +
       labs(
         x = "Year",
-        y = "Predicted deaths",
+        y = "Predicted response",
         title = "Temporal trend (holding covariates at baseline)"
       ) +
       theme_minimal()
@@ -327,8 +382,17 @@ server <- function(input, output, session) {
       return()
     }
     
+    df_now <- current_df()
+    
+    # Get the response variable name from the model formula
+    resp_var <- all.vars(formula(fit))[1]
+    validate(
+      need(resp_var %in% names(df_now),
+           paste("Response variable", resp_var, "not found in current data."))
+    )
+    
     df_plot <- data.frame(
-      obs  = df$Deaths_em,
+      obs  = df_now[[resp_var]],
       pred = as.numeric(pred_df$est)
     )
     
@@ -336,8 +400,8 @@ server <- function(input, output, session) {
       geom_point() +
       geom_abline(slope = 1, intercept = 0, linetype = 2) +
       labs(
-        x = "Observed deaths",
-        y = "Predicted deaths",
+        x = paste("Observed", resp_var),
+        y = "Predicted",
         title = "Observed vs predicted"
       ) +
       theme_minimal()
@@ -387,26 +451,21 @@ server <- function(input, output, session) {
       geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0) +
       geom_vline(xintercept = 0, linetype = 2) +
       labs(
-        x = "Estimate (log scale)",
+        x = "Estimate",
         y = NULL,
         title = "Fixed-effect estimates with 95% CI"
       ) +
       theme_minimal()
   })
   
-  
-  
-  
-  # --- DHARMa residuals for sdmTMB (and others) ----------------------
+  # --- DHARMa residuals for sdmTMB (and others) --------------------
   dharma_object <- reactive({
     fit <- selected_fit()
     req(fit)
     
-    # simulate from the fitted model
-    set.seed(123)  # or remove if you want different sims each time
+    set.seed(123)
     sims <- simulate(fit, nsim = 250, type = "mle-mvn")
     
-    # get DHARMa object
     sdmTMB::dharma_residuals(
       simulated_response = sims,
       object             = fit,
@@ -432,8 +491,6 @@ server <- function(input, output, session) {
     cat("\nZero-inflation test:\n")
     print(DHARMa::testZeroInflation(dh))
   })
-  
-  
   
 }
 

@@ -816,6 +816,29 @@ form_ERxOpioidSES_UR.Time <- as.formula(
 )
 
 
+form_ERxUR.ERxOpioidSES.URxOpioidSES.Time <- as.formula(
+  Deaths_em_rate ~ ER_annual_percapita_z * URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
+)
+
+
+
 ```
 
 #### Create Formula for Deaths_em, instead of Death rate
@@ -948,6 +971,40 @@ form_ER.URxOpioid.SES.Time <- as.formula(
 )
 
 
+form_ERxUR.ERxOpioidSES.URxOpioidSES.Time <- as.formula(
+  Deaths_em ~ ER_annual_percapita_z * URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
+)
+
+
+form_ERxUR.Opioid.SES.Time <- as.formula(
+  Deaths_em ~ ER_annual_percapita_z * URcode + 
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z +
+    time_index
+)
+
+
 ```
 
 
@@ -990,7 +1047,9 @@ form_opts <- c(
   "form_ERxOpioidSES.Spline",
   "form_ERxOpioidSES.Time",
   "form_ER.URxOpioid.SES.Time",
-  "form_ER.All"
+  "form_ER.All",
+  "form_ERxUR.ERxOpioidSES.URxOpioidSES.Time",
+  "form_ERxUR.Opioid.SES.Time"
 )
 
 
@@ -1593,7 +1652,460 @@ saveRDS(fits, "../Shiny/fits.rds")
 
 ```
 
+### 5.2 Create Formula
 
+```{r}
+## Full main-effects model (ER . opioids . SES)
+form_ER.All <- as.formula(
+  Deaths_em_rate ~ URcode + ER_annual_percapita_z +                 # ER visits
+    OXYCODONE_annual_percapita_z +                    # opioid types
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER only
+form_ER <- as.formula(
+  Deaths_em_rate ~ URcode + ER_annual_percapita_z
+)
+
+## ER . Opioids (additive)
+form_ER.Opioid <- as.formula(
+  Deaths_em_rate ~ URcode + ER_annual_percapita_z +
+    OXYCODONE_annual_percapita_z +
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z
+)
+
+## ER . SES (additive)
+form_ER.SES <- as.formula(
+  Deaths_em_rate ~ URcode + ER_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER . Time (additive linear)
+form_ER.Time <- as.formula(
+  Deaths_em_rate ~ URcode + ER_annual_percapita_z +
+    time_index
+)
+
+## ER . SplineTime (additive nonlinear)
+form_ER.Spline <- as.formula(
+  Deaths_em_rate ~ URcode + ER_annual_percapita_z +
+    s(time_index, k = 4)
+)
+
+## ER x Time (interaction)
+form_ERxTime <- as.formula(
+  Deaths_em_rate ~ URcode + ER_annual_percapita_z * time_index
+)
+
+## ER . SES . SplineTime (additive, no interaction)
+form_ER.SES.Spline <- as.formula(
+  Deaths_em_rate ~ URcode + ER_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z +
+    s(time_index, k = 4)
+)
+
+## ER x Opioid . SES (ER interacts with opioids; SES additive)
+form_ERxOpioid.SES <- as.formula(
+  Deaths_em_rate ~ URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z
+    ) +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER x SES . Opioid (ER interacts with SES; opioids additive)
+form_ERxSES.Opioid <- as.formula(
+  Deaths_em_rate ~ URcode + 
+    ER_annual_percapita_z * (
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    OXYCODONE_annual_percapita_z +
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z
+)
+
+## ER x (Opioid + SES) . Spline (maximal interaction)
+form_ERxOpioidSES.Spline <- as.formula(
+  Deaths_em_rate ~ URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    s(time_index, k = 4)
+)
+
+form_ERxOpioidSES.Time <- as.formula(
+  Deaths_em_rate ~ URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
+)
+
+
+form_ERxOpioidSES_UR.Time <- as.formula(
+  Deaths_em_rate ~ URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
+)
+
+
+form_ERxUR.ERxOpioidSES.URxOpioidSES.Time <- as.formula(
+  Deaths_em_rate ~ ER_annual_percapita_z * URcode + 
+    ER_annual_percapita_z * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
+)
+
+
+
+```
+
+## 6 ER and others
+
+#### 6.1 Create Formula for Deaths_em, instead of Death rate
+```{r}
+## MODEL FORMULAS ( "." = additive, "x" = interaction )
+
+## Full main-effects model (ER . opioids . SES)
+form_All <- as.formula(
+  ER_annual_percapita_z ~ URcode +                 # ER visits
+    OXYCODONE_annual_percapita_z +                    # opioid types
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER only
+form_URcode <- as.formula(
+  ER_annual_percapita_z ~ URcode
+)
+
+## ER . Opioids (additive)
+form_URcode.Opioid <- as.formula(
+  ER_annual_percapita_z ~ URcode + 
+    OXYCODONE_annual_percapita_z +
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z
+)
+
+## ER . SES (additive)
+form_URcode.SES <- as.formula(
+  ER_annual_percapita_z ~ URcode +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER . Time (additive linear)
+form_URcode.Time <- as.formula(
+  ER_annual_percapita_z ~ URcode + 
+    time_index
+)
+
+## ER . SplineTime (additive nonlinear)
+form_URcode.Spline <- as.formula(
+  ER_annual_percapita_z ~ URcode + 
+    s(time_index, k = 4)
+)
+
+## ER x Time (interaction)
+form_URcodexTime <- as.formula(
+  ER_annual_percapita_z ~ URcode * time_index
+)
+
+## ER . SES . SplineTime (additive, no interaction)
+form_URcode.SES.Spline <- as.formula(
+  ER_annual_percapita_z ~ URcode +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z +
+    s(time_index, k = 4)
+)
+
+## ER x Opioid . SES (ER interacts with opioids; SES additive)
+form_URcodexOpioid.SES <- as.formula(
+  ER_annual_percapita_z ~ URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z
+    ) +
+    unemployee_rate_z + gini_index_z +
+    poverty_rate_z + disability_rate_z + noinsurance_rate_z
+)
+
+## ER x SES . Opioid (ER interacts with SES; opioids additive)
+form_URcodexSES.Opioid <- as.formula(
+  ER_annual_percapita_z ~ URcode * (
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    OXYCODONE_annual_percapita_z +
+    HYDROCODONE_annual_percapita_z +
+    BUPRENORPHINE_annual_percapita_z +
+    METHADONE_annual_percapita_z
+)
+
+## ER x (Opioid + SES) . Spline (maximal interaction)
+form_URcodexOpioidSES.Spline <- as.formula(
+  ER_annual_percapita_z ~ URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    s(time_index, k = 4)
+)
+
+form_URcodexOpioidSES.Time <- as.formula(
+  ER_annual_percapita_z ~ URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+    ) +
+    time_index
+)
+
+
+form_URcodexOpioidSES.Time <- as.formula(
+  ER_annual_percapita_z ~ URcode +
+    URcode * (
+      OXYCODONE_annual_percapita_z +
+      HYDROCODONE_annual_percapita_z +
+      BUPRENORPHINE_annual_percapita_z +
+      METHADONE_annual_percapita_z) +
+      unemployee_rate_z + gini_index_z +
+      poverty_rate_z + disability_rate_z + noinsurance_rate_z
+     +
+    time_index
+)
+
+
+
+
+```
+
+
+
+
+### 6.2 Model Comparison and Curvature Testing (For EM) [Updated] 
+
+```{r}
+# ---------- helper: fit with warning capture ----------
+fit_with_warnings <- function(expr) {
+  warns <- character(0)
+  res <- withCallingHandlers(
+    try(expr, silent = TRUE),
+    warning = function(w) {
+      warns <<- c(warns, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(result = res, warnings = warns)
+}
+
+# ---------- grids ----------
+families <- list(
+  NB2     = nbinom2(link = "log"),
+  Poisson = poisson(link = "log")
+)
+spatial_opts <- c("off","on")
+st_opts      <- c("off","ar1") # "iid" if you want it
+
+# [New] Try different form. 11.12
+form_opts <- c(
+  "form_All",
+  "form_URcode",
+  "form_URcode.Opioid",
+  "form_URcode.SES",
+  "form_URcodexTime",
+  "form_URcode.SES.Spline",
+  "form_URcodexOpioid.SES",
+  "form_URcodexSES.Opioid",
+  "form_URcodexOpioidSES.Spline",
+  "form_URcodexOpioidSES.Time",
+  "form_URcodexOpioidSES.Time"
+)
+
+
+fits <- list()
+rows <- list()
+i <- 1
+
+for (fam_name in names(families)) {
+  fam <- families[[fam_name]]
+  for (sp in spatial_opts) {
+    for (st in st_opts) {
+      for (form in form_opts) {
+
+        # confirm the formula object exists and fetch it
+        if (!exists(form, inherits = TRUE)) {
+          warning(sprintf("Formula object '%s' not found; skipping.", form))
+          next
+        }
+        form_obj <- get(form, inherits = TRUE)
+
+        # time index only when spatiotemporal != "off"
+        time_arg <- if (st == "off") NULL else "time_index"
+
+        # include form name in model label (and avoid sprintf mismatch)
+        model_name <- paste0(
+          fam_name, "_",
+          "sp", toupper(sp), "_",
+          toupper(st), "_",
+          form
+        )
+
+        cat("Fitting:", model_name, "\n")
+
+        res <- fit_with_warnings(
+          sdmTMB(
+            formula = form_obj,
+            data = df,
+            mesh = mesh,
+            family = fam,
+            spatial = sp,
+            spatiotemporal = st,
+            time = time_arg,
+            offset = df$log_pop,
+            control = sdmTMBcontrol(newton_loops = 3)
+          )
+        )
+
+        if (!inherits(res$result, "try-error")) {
+          fit_i <- res$result
+          fits[[model_name]] <- fit_i
+
+          # --- diagnostics ---
+          pd <- tryCatch(isTRUE(fit_i$sd_report$pdHess), error = function(e) NA)
+          grad_max <- tryCatch({
+            g <- fit_i$sd_report$gradient.fixed
+            if (is.null(g) || length(g) == 0) NA_real_ else suppressWarnings(max(abs(g), na.rm = TRUE))
+          }, error = function(e) NA_real_)
+          warn_txt <- paste(unique(res$warnings), collapse = " | ")
+          warn_hessian <- grepl("Hessian", warn_txt, ignore.case = TRUE)
+          warn_nan     <- grepl("NaN", warn_txt, ignore.case = TRUE)
+
+          rows[[i]] <- tibble::tibble(
+            model = model_name,
+            family = fam_name,
+            spatial = sp,
+            spatiotemporal = st,
+            form = form,
+            AIC = tryCatch(AIC(fit_i), error = function(e) NA_real_),
+            logLik = tryCatch(as.numeric(logLik(fit_i)), error = function(e) NA_real_),
+            npar = tryCatch(attr(logLik(fit_i), "df"), error = function(e) NA_integer_),
+            hessian_pd = pd,
+            grad_max = grad_max,
+            converged_strict = isTRUE(pd) && is.finite(grad_max) && grad_max < 1e-3,
+            n_warnings = length(res$warnings),
+            warn_hessian = warn_hessian,
+            warn_nan = warn_nan,
+            first_warning = if (length(res$warnings)) res$warnings[[1]] else NA_character_
+          )
+        } else {
+          rows[[i]] <- tibble::tibble(
+            model = model_name,
+            family = fam_name,
+            spatial = sp,
+            spatiotemporal = st,
+            form = form,
+            AIC = NA_real_, logLik = NA_real_, npar = NA_integer_,
+            hessian_pd = NA, grad_max = NA_real_, converged_strict = FALSE,
+            n_warnings = length(res$warnings),
+            warn_hessian = grepl("Hessian", paste(res$warnings, collapse=" | "), ignore.case = TRUE),
+            warn_nan = grepl("NaN", paste(res$warnings, collapse=" | "), ignore.case = TRUE),
+            first_warning = if (length(res$warnings)) res$warnings[[1]] else NA_character_
+          )
+        }
+
+        i <- i + 1
+      }
+    }
+  }
+}
+
+
+
+aic_table <- bind_rows(rows) %>%
+  arrange(AIC) %>%
+  mutate(DeltaAIC = AIC - min(AIC, na.rm = TRUE))
+
+#print(aic_table, n = nrow(aic_table))
+
+datatable(
+  aic_table,
+  filter = "top", 
+  options = list(
+    pageLength = 50,
+    autoWidth = TRUE
+  )
+)
+
+
+#write.csv(aic_table, "output/aic_table.csv", row.names = FALSE)
+saveRDS(fits, "../Shiny/fits.rds")
+
+```
 
 
 
