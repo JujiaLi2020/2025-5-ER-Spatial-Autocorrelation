@@ -284,6 +284,7 @@ df_select <- df_er_drug_mortality_acs_UR%>%
     # Deaths
     Deaths,
     # ER visit
+    ER_annual,
     ER_annual_percapita,
     # Drugs
     OXYCODONE_annual_percapita,	HYDROCODONE_annual_percapita,	BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
@@ -300,6 +301,7 @@ scale_vars <-  c(
     # Deaths
     "Deaths",
     # ER visit
+    "ER_annual",
     "ER_annual_percapita",
     # Drugs
     "OXYCODONE_annual_percapita",	"HYDROCODONE_annual_percapita",	"BUPRENORPHINE_annual_percapita", "METHADONE_annual_percapita",
@@ -522,6 +524,7 @@ df_cor <- df_imputated%>%
     Deaths_9,
     Deaths_em,
     # ER visit
+    ER_annual,
     ER_annual_percapita,
     # Drugs
     OXYCODONE_annual_percapita,	HYDROCODONE_annual_percapita,	BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
@@ -547,6 +550,7 @@ scale_vars <-  c(
     Death_select,
 #######################################################    
     # ER visit
+    "ER_annual",
     "ER_annual_percapita",
     # Drugs
     "OXYCODONE_annual_percapita",	"HYDROCODONE_annual_percapita",	"BUPRENORPHINE_annual_percapita", "METHADONE_annual_percapita",
@@ -584,7 +588,7 @@ print(p_heat)
 ```{r , message=FALSE, warning=FALSE}
 df_cor_rate_num <- df_cor_rate %>% 
   #select(where(is.numeric))     # keep only numeric vars
-  select(Deaths_em,Deaths_em_rate, ER_annual_percapita, OXYCODONE_annual_percapita, HYDROCODONE_annual_percapita, BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
+  select(Deaths_em,Deaths_em_rate, ER_annual, ER_annual_percapita, OXYCODONE_annual_percapita, HYDROCODONE_annual_percapita, BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
          unemployee_rate, gini_index, poverty_rate, disability_rate, noinsurance_rate
   )
 
@@ -665,6 +669,10 @@ df <- df_cor_rate |>
   filter(is.finite(X), is.finite(Y), is.finite(pop_CDC))%>%
   mutate(time_index = match(year, sort(unique(year))),
          log_pop    = log(pop_CDC))
+
+
+write.csv(df, "../Data/Data_all.rds")
+
 ```
 
 #### 5.1.1 Mesh
@@ -1354,13 +1362,14 @@ DHARMa::testZeroInflation(dh)
 ```
 
 
-## 6 ER and others
+## 6. ER and others
 
-#### 6.1 Create Formula for Deaths_em, instead of Death rate
+### 6.1 Create Formula for Deaths_em, instead of Death rate
 ```{r}
+
 ## Full main-effects model (ER . opioids . SES)
 form_All <- as.formula(
-  ER_annual_percapita ~ URcode + #ER_annual_percapita_z
+  ER_annual ~ URcode + #ER_annual_percapita_z
     OXYCODONE_annual_percapita_z +
     HYDROCODONE_annual_percapita_z +
     BUPRENORPHINE_annual_percapita_z +
@@ -1371,12 +1380,12 @@ form_All <- as.formula(
 
 ## ER only
 form_URcode <- as.formula(
-  ER_annual_percapita ~ URcode
+  ER_annual ~ URcode
 )
 
 ## ER . Opioids (additive)
 form_URcode.Opioid <- as.formula(
-  ER_annual_percapita ~ URcode +
+  ER_annual ~ URcode +
     OXYCODONE_annual_percapita_z +
     HYDROCODONE_annual_percapita_z +
     BUPRENORPHINE_annual_percapita_z +
@@ -1386,29 +1395,29 @@ form_URcode.Opioid <- as.formula(
 
 ## ER . SES (additive)
 form_URcode.SES <- as.formula(
-  ER_annual_percapita ~ URcode +
+  ER_annual ~ URcode +
     unemployee_rate_z + gini_index_z +
     poverty_rate_z + disability_rate_z + noinsurance_rate_z
 )
 
 ## ER . Time (additive linear)
 form_URcode.Time <- as.formula(
-  ER_annual_percapita ~ URcode + time_index
+  ER_annual ~ URcode + time_index
 )
 
 ## ER . SplineTime (additive nonlinear)
 form_URcode.Spline <- as.formula(
-  ER_annual_percapita ~ URcode + s(time_index, k = 4)
+  ER_annual ~ URcode + s(time_index, k = 4)
 )
 
 ## ER x Time (interaction)
 form_URcodexTime <- as.formula(
-  ER_annual_percapita ~ URcode * time_index
+  ER_annual ~ URcode * time_index
 )
 
 ## ER . SES . SplineTime (additive, no interaction)
 form_URcode.SES.Spline <- as.formula(
-  ER_annual_percapita ~ URcode +
+  ER_annual ~ URcode +
     unemployee_rate_z + gini_index_z +
     poverty_rate_z + disability_rate_z + noinsurance_rate_z +
     s(time_index, k = 4)
@@ -1416,7 +1425,7 @@ form_URcode.SES.Spline <- as.formula(
 
 ## ER x Opioid . SES (ER interacts with opioids; SES additive)
 form_URcodexOpioid.SES <- as.formula(
-  ER_annual_percapita ~
+  ER_annual ~
     URcode * (
       OXYCODONE_annual_percapita_z +
       HYDROCODONE_annual_percapita_z +
@@ -1429,7 +1438,7 @@ form_URcodexOpioid.SES <- as.formula(
 
 ## ER x SES . Opioid (ER interacts with SES; opioids additive)
 form_URcodexSES.Opioid <- as.formula(
-  ER_annual_percapita ~
+  ER_annual ~
     URcode * (
       unemployee_rate_z + gini_index_z +
       poverty_rate_z + disability_rate_z + noinsurance_rate_z
@@ -1442,7 +1451,7 @@ form_URcodexSES.Opioid <- as.formula(
 
 ## ER x (Opioid + SES) . Spline (maximal interaction)
 form_URcodexOpioidSES.Spline <- as.formula(
-  ER_annual_percapita ~
+  ER_annual ~
     URcode * (
       OXYCODONE_annual_percapita_z +
       HYDROCODONE_annual_percapita_z +
@@ -1456,7 +1465,7 @@ form_URcodexOpioidSES.Spline <- as.formula(
 
 ## ER x (Opioid + SES) . Time (maximal interaction + linear trend)
 form_URcodexOpioidSES.Time <- as.formula(
-  ER_annual_percapita ~
+  ER_annual ~
     URcode * (
       OXYCODONE_annual_percapita_z +
       HYDROCODONE_annual_percapita_z +
