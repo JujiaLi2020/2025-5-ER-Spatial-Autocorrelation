@@ -1,0 +1,1477 @@
+---
+title: "Opioid, ED Visit, & Mortality"
+output: html_notebook
+---
+
+
+
+#1. Prepare Data
+## 1.1 Activate Packages
+```{r}
+#install.packages("knitr")
+library(dplyr)
+library(readr)
+library(lubridate)
+library(tidyr)
+library(stringr)
+library(janitor)
+library(sdmTMB)
+library(tigris)
+library(sf)
+library(here)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(psych)
+
+install.packages("patchwork")
+library(patchwork)
+```
+
+## 1.2 Merge Datasets
+```{r figure2, echo=FALSE, message=FALSE, warning=FALSE}
+###############################
+
+#repos <- "/Users/yuihuiyao/Library/CloudStorage/Box-Box/2025-5-ER-Spatial-Autocorrelation"
+#repos <- "C:/Users/julia/Box/Personal/Research/2025-5-ER-Spatial-Autocorrelation"
+
+repos <- here()
+
+file_path <- paste(repos, "/Data/ER_opioid_2016_2019_cleaned.csv", sep = "")
+if (!file.exists(file_path)) {
+  stop("File not found: Data/ER_opioid_2016_2019_cleaned.csv")
+}
+er_data <- read_csv(file_path, show_col_types = FALSE)
+
+# Keep a subset of North / Central AL (as in your script)
+keep_cnty <- toupper(c(
+  "Lauderdale","Limestone","Madison","Jackson","Colbert","Franklin",
+  "Lawrence","Morgan","Marshall","Dekalb","Marion","Winston",
+  "Cullman","Blount","Etowah","Cherokee","Lamar","Fayette",
+  "Walker","Jefferson","St. Clair","Pickens","Tuscaloosa","Shelby"
+))
+
+er_data <- er_data |>
+  mutate(County = toupper(County),
+         Date = as.Date(Date)) |>
+  filter(County %in% keep_cnty)
+
+
+# Read Data_ARCOS and clean for next process
+Data_ARCOS <- read_csv(paste(repos, "/BigData/ARCOS_AL_2016_2019_cleaned.csv", sep = ""))
+
+Data_ARCOS_filted <- Data_ARCOS%>%
+  filter(drug %in% c("OXYCODONE", "HYDROCODONE", "BUPRENORPHINE", "METHADONE"))%>%
+  filter(county %in% toupper(c(
+    "Lauderdale", "Limestone", "Madison", "Jackson", "Colbert", "Franklin",
+    "Lawrence", "Morgan", "Marshall", "Dekalb", "Marion", "Winston",
+    "Cullman", "Blount", "Etowah", "Cherokee", "Lamar", "Fayette",
+    "Walker", "Jefferson", "St. Clair", "Pickens", "Tuscaloosa", "Shelby"
+  ))
+  )%>%
+  #mutate(mme = mme/1000000)%>%
+  mutate(Date = mdy(date))%>%
+  mutate(County = toupper(county))
+
+arcos_wide_mme <- Data_ARCOS_filted %>%
+  pivot_wider(
+    id_cols    = c(County, Date),
+    names_from = drug,
+    values_from= mme,
+    values_fill = 0
+  )
+
+df_er_drug <- left_join(
+  er_data,
+  arcos_wide_mme,
+  by = c("County", "Date")
+)
+
+###############################
+
+# Presence at daily level
+df_er_drug <- df_er_drug |>
+  mutate(
+    year = year(Date),
+    presence = if_else(Count > 0, 1L, 0L)
+  )
+
+# Aggregate to county × year
+df_er_drug_annual <- df_er_drug %>%
+  group_by(County, year) %>%
+  summarise(
+    # population for the year (choose one: mean/first/median)
+    pop_year = first(pop),
+
+    # ER annual
+    ER_annual = sum(Count, na.rm = TRUE),
+
+    # Drug annual
+    OXYCODONE_annual     = sum(OXYCODONE,     na.rm = TRUE),
+    HYDROCODONE_annual   = sum(HYDROCODONE,   na.rm = TRUE),
+    BUPRENORPHINE_annual = sum(BUPRENORPHINE, na.rm = TRUE),
+    METHADONE_annual     = sum(METHADONE,     na.rm = TRUE),
+
+    presence = as.integer(sum(Count, na.rm = TRUE) > 0),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # per-capita (proportion) and per 100k (common epidemiology scale)
+    ER_annual_percapita           = ER_annual / pop_year,
+    ER_annual_per100k             = ER_annual_percapita * 1e5,
+
+    OXYCODONE_annual_percapita    = OXYCODONE_annual     / pop_year,
+    OXYCODONE_annual_per100k      = OXYCODONE_annual_percapita * 1e5,
+
+    HYDROCODONE_annual_percapita  = HYDROCODONE_annual   / pop_year,
+    HYDROCODONE_annual_per100k    = HYDROCODONE_annual_percapita * 1e5,
+
+    BUPRENORPHINE_annual_percapita = BUPRENORPHINE_annual / pop_year,
+    BUPRENORPHINE_annual_per100k   = BUPRENORPHINE_annual_percapita * 1e5,
+
+    METHADONE_annual_percapita    = METHADONE_annual     / pop_year,
+    METHADONE_annual_per100k      = METHADONE_annual_percapita * 1e5
+  )
+
+###############################
+
+mortality <- read_csv(paste(repos, "/Data/CDCWonder Opioid Related Mortality AL 2016-2019.csv", sep = ""))
+
+mortality_filted <- mortality%>%
+  mutate(County = toupper(gsub(" County, AL", "", County)))%>%
+  filter(County %in% toupper(c(
+    "Lauderdale", "Limestone", "Madison", "Jackson", "Colbert", "Franklin",
+    "Lawrence", "Morgan", "Marshall", "Dekalb", "Marion", "Winston",
+    "Cullman", "Blount", "Etowah", "Cherokee", "Lamar", "Fayette",
+    "Walker", "Jefferson", "St. Clair", "Pickens", "Tuscaloosa", "Shelby"
+  )))%>%
+  mutate(
+    Deaths = suppressWarnings(as.numeric(Deaths)),      # "Suppressed" → NA
+    CrudeRate = suppressWarnings(as.numeric(CrudeRate)),
+    deaths_per100k = Deaths / Population * 1e5
+  )%>%
+  rename(year = Year,
+         pop_CDC=Population)
+
+
+# Merge
+df_er_drug_mortality <- left_join(
+  df_er_drug_annual,
+  mortality_filted,
+  by = c("County", "year")
+)
+
+###############################
+
+acs <- read_csv(paste(repos, "/Data/ACS 2019 Data Subset.csv", sep = ""))
+
+
+
+# 1) Build a safe, readable column name from Concept + Label
+clean_colname <- function(concept, label) {
+  # drop leading "Estimate!!"
+  label2 <- str_remove(label, "^Estimate!!")
+  # collapse "!!" / ":" and other punctuation to separators
+  label2 <- str_replace_all(label2, "!!", "_")
+  label2 <- str_replace_all(label2, "[:;,-]+", "")
+  # build combined name, then snake case + de-duplicate
+  nm <- paste(concept, label2, sep = "__")
+  # nm <- janitor::make_clean_names(nm)
+  nm
+}
+
+acs2 <- acs %>%
+  mutate(
+    colname = clean_colname(Concept, Label)
+  )
+
+# 2) If there are duplicates per (State, County, Full_FIPS, colname), choose the first non-NA
+acs_collapsed <- acs2 %>%
+  group_by(State, County, Full_FIPS, colname) %>%
+  summarise(Value = dplyr::first(na.omit(Value)), .groups = "drop")
+
+
+# 3) Pivot to wide
+acs_wide <- acs_collapsed %>%
+  pivot_wider(
+    id_cols    = c(State, County, Full_FIPS),
+    names_from = colname,
+    values_from = Value,
+    values_fill = NA_real_
+  ) %>%
+  clean_names()%>%
+  mutate(CountyCode = full_fips)# final pass to ensure valid names
+
+# Merge three imputated mortality
+df_er_drug_mortality_acs <- left_join(
+  df_er_drug_mortality,
+  acs_wide,
+  by = c("CountyCode")
+  )
+#summary(mortality_filted)
+
+###############################
+
+df_er_drug_mortality_acs <- df_er_drug_mortality_acs%>%
+  mutate(
+    unemployee_rate = employment_status_for_the_population_16_years_and_over_total_in_labor_force_civilian_labor_force_unemployed/employment_status_for_the_population_16_years_and_over_total_in_labor_force_civilian_labor_force,
+
+    gini_index = gini_index_of_income_inequality_gini_index,
+
+    median_income = median_household_income_in_the_past_12_months_in_2021_inflation_adjusted_dollars_median_household_income_in_the_past_12_months_in_2021_inflationadjusted_dollars,
+
+    poverty_rate = poverty_status_in_the_past_12_months_by_sex_by_age_total_income_in_the_past_12_months_below_poverty_level/poverty_status_in_the_past_12_months_by_sex_by_age_total,
+
+    # sum all columns about disability
+    disability = rowSums(
+      across(starts_with("sex_by_age_by_disability"),
+             ~ as.numeric(.x)),           # ensure numeric
+      na.rm = TRUE),
+    # (optional) per-capita / per-100k versions
+    disability_rate      = disability / total_population_total,
+    disability_per100k   = disability_rate * 1e5,
+
+    # sum all columns about noinsurance
+    noinsurance = rowSums(
+      across(starts_with("types_of_health_insurance_coverage"),
+             ~ replace_na(as.numeric(.x), 0)),
+      na.rm = TRUE
+    ),
+    # Optional: per-capita or per-100k version
+    noinsurance_rate    = noinsurance / total_population_total,
+    noinsurance_per100k = noinsurance_rate * 1e5)
+
+###############################
+
+df_select <- df_er_drug_mortality_acs%>%
+  select(
+    County,
+    year,
+    pop_CDC,
+    # Deaths
+    Deaths,
+    # ER visit
+    ER_annual_percapita,
+    # Drugs
+    OXYCODONE_annual_percapita, HYDROCODONE_annual_percapita,   BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
+
+    # ACS
+    unemployee_rate,    gini_index, poverty_rate,   disability_rate, noinsurance_rate
+    )
+
+###############################
+
+scale_vars <-  c(
+    # Deaths
+    "Deaths",
+    # ER visit
+    "ER_annual_percapita",
+    # Drugs
+    "OXYCODONE_annual_percapita",   "HYDROCODONE_annual_percapita", "BUPRENORPHINE_annual_percapita", "METHADONE_annual_percapita",
+
+    # ACS
+    "unemployee_rate",  "gini_index",   "poverty_rate", "disability_rate", "noinsurance_rate"
+    )
+
+df_select_z <- df_select %>%
+  mutate(Deaths_rate= Deaths / pop_CDC)%>%
+  mutate(across(all_of(scale_vars), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
+
+
+###############################
+# initialization
+###############################
+
+###############################
+
+df_select_z$time_index <- df_select_z$year - 2018
+df_select_z$intervention2017 <- as.numeric(df_select_z$year >= 2018)
+df_select_z_int <- df_select_z
+#df_select_z_int$Deaths[is.na(df_select_z_int$Deaths)] <- (9+1)/2
+
+df_select_z_int$rural <- 0
+
+df_select_z_int$rural[which(df_select_z_int$County == "BLOUNT")] <- 2
+df_select_z_int$rural[which(df_select_z_int$County == "CHEROKEE")] <- 6
+df_select_z_int$rural[which(df_select_z_int$County == "COLBERT")] <- 4
+df_select_z_int$rural[which(df_select_z_int$County == "CULLMAN")] <- 5
+df_select_z_int$rural[which(df_select_z_int$County == "ETOWAH")] <- 4
+df_select_z_int$rural[which(df_select_z_int$County == "FAYETTE")] <- 6
+df_select_z_int$rural[which(df_select_z_int$County == "FRANKLIN")] <- 5
+df_select_z_int$rural[which(df_select_z_int$County == "JACKSON")] <- 5
+df_select_z_int$rural[which(df_select_z_int$County == "JEFFERSON")] <- 2
+df_select_z_int$rural[which(df_select_z_int$County == "LAMAR")] <- 6
+df_select_z_int$rural[which(df_select_z_int$County == "LAUDERDALE")] <- 4
+df_select_z_int$rural[which(df_select_z_int$County == "LAWRENCE")] <- 4
+df_select_z_int$rural[which(df_select_z_int$County == "LIMESTONE")] <- 3
+df_select_z_int$rural[which(df_select_z_int$County == "MADISON")] <- 3
+df_select_z_int$rural[which(df_select_z_int$County == "MARION")] <- 6
+df_select_z_int$rural[which(df_select_z_int$County == "MARSHALL")] <- 5
+df_select_z_int$rural[which(df_select_z_int$County == "MORGAN")] <- 4
+df_select_z_int$rural[which(df_select_z_int$County == "PICKENS")] <- 3
+df_select_z_int$rural[which(df_select_z_int$County == "SHELBY")] <- 2
+df_select_z_int$rural[which(df_select_z_int$County == "TUSCALOOSA")] <- 3
+df_select_z_int$rural[which(df_select_z_int$County == "WALKER")] <- 2
+df_select_z_int$rural[which(df_select_z_int$County == "WINSTON")] <- 6
+
+df_select_z_int$rural_factor <- factor(df_select_z_int$rural)
+
+###############################
+
+
+counties_sf <- tigris::counties(state = "AL", cb = TRUE, year = 2023) |>
+  st_transform(26916) |>
+  mutate(County = toupper(NAME))
+
+coords_m  <- st_coordinates(st_centroid(st_geometry(counties_sf)))
+county_xy <- counties_sf |>
+  st_drop_geometry() |>
+  transmute(
+    County,
+    X = coords_m[, "X"] / 1000,  # km
+    Y = coords_m[, "Y"] / 1000
+  )
+
+# Merge coords into model frame
+df <- df_select_z_int %>%
+  left_join(county_xy, by = "County") %>%
+  filter(is.finite(X), is.finite(Y), is.finite(pop_CDC))%>%
+  mutate(time_index = match(year, sort(unique(year))),
+         log_pop    = log(pop_CDC))
+
+mesh <- make_mesh(
+  df,
+  xy_cols = c("X","Y"),
+  cutoff = diff(range(df$X, na.rm = TRUE)) / 10
+)
+
+###############################
+
+df$time_index_factor <- factor(df$time_index)
+
+###############################
+# County-level summary for Study Population / Table 1 (from ACS-merged data)
+county_chars <- df_er_drug_mortality_acs %>%
+  group_by(County) %>%
+  summarise(
+    population    = round(mean(pop_CDC, na.rm = TRUE)),
+    median_income = round(median(median_income, na.rm = TRUE), -2),
+    pct_uninsured = round(100 * mean(noinsurance_rate, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    County_display = str_to_title(County),
+    HPSA = NA_integer_   # HPSA not in current data
+  )
+
+###############################
+
+write.csv(df, paste0(repos,"/Data/all.csv"))
+
+```
+
+## 1.3 Read Merged Data [Optional]
+```{r}
+#df <- read.csv(paste0(repos,"/Data/all.csv"))
+```
+
+
+# 2. Descriptive Statistics
+
+##  [[[Table 1 (Part 1)]]]. County Characteristics in Northwestern Alabama, 2016–2019
+
+```{r table1-study-population, results='asis'}
+county_chars <- df %>%
+  mutate(County = str_to_title(County)) %>%
+  group_by(County) %>%
+  summarise(
+    population    = round(mean(as.numeric(pop_CDC), na.rm = TRUE)),
+    pct_gini = round(100 * mean(as.numeric(gini_index), na.rm = TRUE), 1),
+    pct_uninsured = round(100 * mean(as.numeric(noinsurance_rate), na.rm = TRUE), 1),
+    pct_unemployee = round(100 * mean(as.numeric(unemployee_rate), na.rm = TRUE), 1),
+    pct_poverty = round(100 * mean(as.numeric(poverty_rate), na.rm = TRUE), 1),
+    pct_disability = round(100 * mean(as.numeric(disability_rate), na.rm = TRUE), 1),
+    median_income = NA_real_,  # not in all.csv
+    HPSA         = NA_integer_,
+    .groups = "drop"
+  )
+
+county_chars
+
+#write.csv(county_chars, paste0(repos,"/Data/table1.csv"))
+
+```
+
+
+
+## [[[Table 1 (Part 2)]]]. County Characteristics in Northwestern Alabama, 2016–2019
+
+```{r table2-ed-deaths, results='asis'}
+# Regional totals and by-year summary from df (all.csv)
+df_num <- df %>%
+  mutate(
+    pop_CDC   = as.numeric(pop_CDC),
+    Deaths    = as.numeric(Deaths),
+    ER_percap = as.numeric(ER_annual_percapita)
+  )%>%
+  mutate(
+    ed_per_10k   = round(ER_percap* 1e4, 2),
+    deaths_per_100k = round(Deaths / pop_CDC * 1e5, 2)
+  )
+
+ed_death_wide <- df_num %>%
+  # Select only the columns needed for the final table
+  select(County, rural, year, ed_per_10k, deaths_per_100k) %>%
+  # Pivot to create year-based subcolumns
+  pivot_wider(
+    names_from = year,
+    values_from = c(ed_per_10k, deaths_per_100k),
+    names_glue = "{year}_{.value}"
+  ) 
+
+
+# %>%
+#   # Optional: Reorder columns so the years are grouped together
+#   select(County, sort(peek_vars()))
+
+write.csv(ed_death_wide, paste0(repos,"/Data/table2.csv"))
+
+
+```
+
+
+## [[[Figure 1]]]. County-Level Emergency Department Visit Rates, 2016–2019s
+```{r}
+fig1_data <- df_num %>%
+  filter(year >= 2016, year <= 2019) %>%
+  mutate(
+    year = as.numeric(as.character(year))
+  )
+
+ggplot(
+  fig1_data,
+  aes(x = year, y = ed_per_10k, group = 1)
+) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 1.2) +
+  facet_wrap(~ County, scales = "free_y", ncol = 3) +
+  scale_x_continuous(
+    breaks = c(2016, 2017, 2018, 2019)
+  ) +
+  labs(
+    title = "County-Level Emergency Department Visit Rates, 2016–2019",
+    x = "Year",
+    y = "ED Visits per 10,000 Population"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold", size = 10),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+```
+
+
+# 3. Imputation and Model Comparison Leave-One-Out Cross-Validatio with Truncated Expectation
+
+### [!!! Please skip 3.0], we use selected model from Yao's Output
+
+## 3.0 Comparison All Models [Optional]
+```{r}
+getFit <- function(df, df_select_z_int, formula, family = poisson(link = "log"), spatial = "off", spatiotemporal = "off") {
+
+  tr_ex <- function(mu, lower = 1, upper = 9) {
+    mu_tr <- sum(((lower:upper) * dpois(lower:upper, mu))) / (ppois(upper, mu) - ppois(lower - 1, mu))
+    mu_tr <- ifelse(mu_tr > 9, 9, mu_tr)
+    mu_tr <- ifelse(mu_tr < 1, 1, mu_tr)
+  }
+
+  tr_ex <- Vectorize(tr_ex, "mu")
+
+  df$Deaths[is.na(df_select_z_int$Deaths)] <- (9+1)/2
+
+  ###############################
+
+
+  log_lik_old <- -Inf
+  log_lik_new <- Inf
+  diff_lik <- Inf
+  si <- -1
+  tol <- 1e-4
+
+  r <- 0
+
+  previous_fit <- NULL
+
+    mesh <- make_mesh(
+      df,
+      xy_cols = c("X","Y"),
+      cutoff = diff(range(df$X, na.rm = TRUE)) / 10
+    )
+
+  while ((diff_lik > tol) & (si == -1)) {
+    r <- r + 1
+
+    cat("r:", r, ", log_lik:", log_lik_old, "\n")
+    fit <- try(sdmTMB(
+      formula = formula,
+      data = df,
+      mesh = mesh,
+      time = "time_index",
+      family  = family,
+      spatial = spatial,
+      spatiotemporal = spatiotemporal,
+      offset  = df$log_pop,
+      previous_fit = previous_fit
+    ), silent = TRUE)
+
+    if (class(fit)[1] == "try-error") {
+      cat("  sdmTMB fitting failed at iteration", r, "\n")
+      break
+    }
+
+    previous_fit <- fit
+
+    if (r == 1) {
+      init_fit <- previous_fit
+    }
+
+    log_lik_new <- logLik(fit)
+
+    fitted_value <- fitted(fit)
+
+    tmp_fitted_value <- fitted_value[is.na(df_select_z_int$Deaths)]
+    tmp_fitted_value <- tr_ex(tmp_fitted_value)
+
+    df$Deaths[is.na(df_select_z_int$Deaths)] <- tmp_fitted_value
+
+    diff_lik <- (log_lik_old - log_lik_new)
+    si <- sign(log_lik_old - log_lik_new)
+    diff_lik <- abs(diff_lik)
+
+    log_lik_old <- log_lik_new
+
+  }
+
+  list("init_fit" = init_fit, "fit" = previous_fit, "imputed_df" = df)
+
+}
+
+
+
+
+cv_getFit_loo <- function(df, df_select_z_int, formula,
+                          family = poisson(link = "log"), spatial = "off", spatiotemporal = "off") {
+
+  n <- nrow(df)
+
+  notna <- which(!is.na(df$Deaths))
+  K <- length(notna)
+
+  cv_st <- matrix(NA_real_, nrow = K, ncol = 4)
+  colnames(cv_st) <- c("IM_RMSE", "IM_MAE","EM_RMSE", "EM_MAE")
+
+  r <- 0
+  for (k in notna) {
+    r <- r + 1
+    cat("  Fold", r, "of", K, "\n")
+    test_idx  <- k
+    train_idx <- 1:n
+    train_idx <- train_idx[train_idx != test_idx]
+
+    df_train        <- df[train_idx, , drop = FALSE]
+    df_select_train <- df_select_z_int[train_idx, , drop = FALSE]
+    df_test         <- df[test_idx, , drop = FALSE]
+
+    # Fit model on training data
+      fit_k <- try(getFit(df_train, df_select_train, formula,
+                          family, spatial = spatial, spatiotemporal = spatiotemporal), silent = TRUE)
+
+
+    if (class(fit_k)[1] == "try-error") {
+      cv_st[r, "IM_RMSE"] <- NA
+      cv_st[r, "IM_MAE"] <- NA
+      cv_st[r, "EM_RMSE"] <- NA
+      cv_st[r, "EM_MAE"] <- NA
+      next
+    }
+
+    # Predict on test data
+    pred_init <- try(predict(fit_k$init_fit, newdata = df_test, offset = df_test$log_pop, type = "response"), silent = TRUE)
+
+    if (class(pred_init)[1] == "try-error") {
+      cv_st[r, "IM_RMSE"] <- NA
+      cv_st[r, "IM_MAE"] <- NA
+    } else {
+      pred_init <- pred_init$est
+      # Use only rows with observed Deaths
+      pred_notna    <- pred_init[!is.na(df_test$Deaths)]
+      deaths_notna  <- df_test$Deaths[!is.na(df_test$Deaths)]
+
+      rmse <- (((pred_notna - deaths_notna)^2))
+      mae <- (abs(pred_notna - deaths_notna))
+      cv_st[r, "IM_RMSE"] <- rmse
+      cv_st[r, "IM_MAE"] <- mae
+    }
+
+
+
+    pred <- try(predict(fit_k$fit, newdata = df_test, offset = df_test$log_pop, type = "response"), silent = TRUE)
+
+    if (class(pred)[1] == "try-error") {
+      cv_st[r, "EM_RMSE"] <- NA
+      cv_st[r, "EM_MAE"] <- NA
+    } else {
+      pred <- pred$est
+      # Use only rows with observed Deaths
+      pred_notna    <- pred[!is.na(df_test$Deaths)]
+      deaths_notna  <- df_test$Deaths[!is.na(df_test$Deaths)]
+
+      rmse <- (((pred_notna - deaths_notna)^2))
+      mae <- (abs(pred_notna - deaths_notna))
+      cv_st[r, "EM_RMSE"] <- rmse
+      cv_st[r, "EM_MAE"] <- mae
+    }
+
+
+  }
+
+  cv_st <- colMeans(cv_st, na.rm = TRUE)
+  cv_st[c(1, 3)] <- sqrt(cv_st[c(1, 3)])
+  cv_st
+}
+
+
+###############################
+
+###############################
+
+cor_df <- df %>% select(
+  ER_annual_percapita_z,
+  OXYCODONE_annual_percapita_z,
+  HYDROCODONE_annual_percapita_z,
+  BUPRENORPHINE_annual_percapita_z,
+  METHADONE_annual_percapita_z,
+  unemployee_rate_z,
+  gini_index_z,
+  poverty_rate_z,
+  disability_rate_z,
+  noinsurance_rate_z
+)
+
+corrplot::corrplot(cor(cor_df, method = "spearman"))
+
+###############################
+
+full_formula <- Deaths ~ ER_annual_percapita_z +
+  OXYCODONE_annual_percapita_z +
+  #HYDROCODONE_annual_percapita_z +
+  BUPRENORPHINE_annual_percapita_z +
+  METHADONE_annual_percapita_z +
+  #unemployee_rate_z +
+  #gini_index_z +
+  poverty_rate_z +
+  disability_rate_z +
+  noinsurance_rate_z +
+  rural_factor
+
+fit0 <- getFit(df, df_select_z_int, full_formula)
+
+car::vif(fit0$fit)
+
+###############################
+  #remove the highest VIF until all less than 5
+###############################
+
+wrapper <- function(X, formulas, df, df_select_z_int) {
+  
+  formula <- formulas[[X]]
+  
+  cv <- list()
+  
+  cv[[1]] <- try(cv_getFit_loo(df, df_select_z_int, formula, spatial = "off", spatiotemporal = "off"), silent = TRUE)
+  cv[[2]] <- try(cv_getFit_loo(df, df_select_z_int, formula, spatial = "on", spatiotemporal = "off"), silent = TRUE)
+  cv[[3]] <- try(cv_getFit_loo(df, df_select_z_int, formula, spatial = "off", spatiotemporal = "ar1"), silent = TRUE)
+  cv[[4]] <- try(cv_getFit_loo(df, df_select_z_int, formula, spatial = "on", spatiotemporal = "ar1"), silent = TRUE)
+  cv[[5]] <- try(cv_getFit_loo(df, df_select_z_int, formula, family = nbinom2(link = "log"), spatial = "off", spatiotemporal = "off"), silent = TRUE)
+  cv[[6]] <- try(cv_getFit_loo(df, df_select_z_int, formula, family = nbinom2(link = "log"), spatial = "on", spatiotemporal = "off"), silent = TRUE)
+  cv[[7]] <- try(cv_getFit_loo(df, df_select_z_int, formula, family = nbinom2(link = "log"), spatial = "off", spatiotemporal = "ar1"), silent = TRUE)
+  cv[[8]] <- try(cv_getFit_loo(df, df_select_z_int, formula, family = nbinom2(link = "log"), spatial = "on", spatiotemporal = "ar1"), silent = TRUE)
+
+  out <- NULL
+  
+  for (i in 1:4) {
+    if (class(cv[[i]]) != "try-error") {
+      out <- c(out, cv[[i]])
+    } else {
+      out <- c(out, rep(NA, 4))
+    }
+  }
+  
+  out
+  
+}
+
+
+
+base_vars <- c(
+  "ER_annual_percapita_z",
+  "OXYCODONE_annual_percapita_z",
+  "BUPRENORPHINE_annual_percapita_z",
+  "METHADONE_annual_percapita_z",
+  "rural_factor"
+)
+
+covars <- c("poverty_rate_z", "disability_rate_z", "noinsurance_rate_z", "rural_factor")
+
+make_formula <- function(vars){
+  rhs_main <- if(length(vars) > 0){
+    paste0("(", paste(vars, collapse = " + "), ") * intervention2017")
+  } else {
+    "intervention2017"
+  }
+  rhs_cov <- paste(covars, collapse = " + ")
+  as.formula(paste("Deaths ~", rhs_main, "+", rhs_cov))
+}
+
+make_formula1 <- function(vars){
+  rhs_main <- if(length(vars) > 0){
+    paste0("(", paste(vars, collapse = " + "), ") + intervention2017")
+  } else {
+    "intervention2017"
+  }
+  rhs_cov <- paste(covars, collapse = " + ")
+  as.formula(paste("Deaths ~", rhs_main, "+", rhs_cov))
+}
+
+subsets <- unlist(
+  lapply(0:length(base_vars), function(k)
+    combn(base_vars, k, simplify = FALSE)
+  ),
+  recursive = FALSE
+)
+
+formulas <- NULL
+
+formulas <- lapply(subsets, make_formula)
+names(formulas) <- sapply(subsets, function(v)
+  if(length(v) == 0) "none" else paste(v, collapse = "_")
+)
+
+formulas1 <- NULL
+
+formulas1 <- lapply(subsets, make_formula1)
+names(formulas) <- sapply(subsets, function(v)
+  if(length(v) == 0) "none" else paste(v, collapse = "_")
+)
+
+
+formulas2 <- list()
+
+for  (i in 1:length(formulas)) {
+  formulas2[[i]] <- formulas[[i]]
+  formulas2[[length(formulas) + (i)]] <- formulas1[[i]]
+}
+
+
+nn <- length(formulas2)
+
+formulas2[[nn + 1]] <- Deaths ~ ER_annual_percapita_z
+formulas2[[nn + 2]] <- Deaths ~ OXYCODONE_annual_percapita_z
+formulas2[[nn + 3]] <- Deaths ~ BUPRENORPHINE_annual_percapita_z
+formulas2[[nn + 4]] <- Deaths ~ METHADONE_annual_percapita_z
+formulas2[[nn + 5]] <- Deaths ~ poverty_rate_z
+formulas2[[nn + 6]] <- Deaths ~ disability_rate_z
+formulas2[[nn + 7]] <- Deaths ~ noinsurance_rate_z
+formulas2[[nn + 8]] <- Deaths ~ rural_factor
+formulas2[[nn + 9]] <- Deaths ~ intervention2017
+
+
+############################### Parallel
+
+nform <- length(formulas2)
+
+cl <- parallel::makeCluster(min(floor(18), nform))
+parallel::clusterExport(cl, c("getFit", "cv_getFit_loo", "wrapper"))
+parallel::clusterEvalQ(cl, library(dplyr))
+parallel::clusterEvalQ(cl, library(readr))
+parallel::clusterEvalQ(cl, library(lubridate))
+parallel::clusterEvalQ(cl, library(tidyr))
+parallel::clusterEvalQ(cl, library(stringr))
+parallel::clusterEvalQ(cl, library(janitor))
+parallel::clusterEvalQ(cl, library(sdmTMB))
+parallel::clusterEvalQ(cl, library(tigris))
+parallel::clusterEvalQ(cl, library(sf))
+
+
+out <- parallel::parLapplyLB(cl, X = 1:nform, fun = wrapper, formulas = formulas2, df = df, df_select_z_int = df_select_z_int)
+
+#save(out, file = paste0(repos, "/Data/Yao_out.Rdat"))
+
+```
+
+## 3.1 The Best Model (From Yao's output)
+```{r}
+load(paste0(repos, "/Data/Yao_out.Rdat"))
+```
+
+
+```{r}
+outmatrix <- matrix(NA, nrow = length(out), ncol = length(out[[1]]))
+
+for (i in 1:length(out)) {
+  
+  outmatrix[i, ] <- out[[i]]
+  
+  
+}
+
+# 1. Identify the index of the best performing model
+# (Using your criteria: min value in specific columns)
+best_idx <- which(outmatrix == min(outmatrix[, c(2, 4, 6, 8, 10, 12, 14, 16)]), arr.ind = TRUE)[1]
+
+# 2. Extract that specific formula from your list
+best_formula <- formulas2[[best_idx]]
+
+# 3. Re-fit the model to get the full sdmTMB object
+# Ensure 'spatial' is "on" to get the Omega (spatial random effects)
+final_fit <- getFit(
+  df = df, 
+  df_select_z_int = df_select_z_int, 
+  formula = best_formula, 
+  spatial = "off", # "on"
+  spatiotemporal = "off"
+)
+
+final_fit
+
+
+print ("Imputed Data")
+final_fit$imputed_df
+
+
+```
+
+```{r}
+fit0$fit$data$Deaths
+
+formula_imputated<- Deaths ~ ER_annual_percapita_z
+
+fit_imputated <- sdmTMB(
+      formula = formula_imputated,
+      data = final_fit$imputed_df,
+      mesh = mesh,
+
+      offset  = df$log_pop
+    )
+
+fit_imputated   
+```
+
+
+
+## 3.2 Scatted plot: Relationship Between ED Visits and Mortality [Optional]
+```{r}
+# 1. Get the data
+# We use fit0$imputed_df because getFit returns the df with filled values in that list element.
+# If you want to plot a different model result, run: fit_best <- getFit(df, df_select_z_int, your_best_formula)
+plot_data <- fit0$fit$data%>%
+  mutate(Death_10k=Deaths*10000/pop_CDC)%>%
+  mutate(ER_annual_10k=ER_annual_percapita*10000)
+  
+
+# 2. Identify Observed vs. Adjusted points
+# We look at the original 'df_select_z_int' to see which Death values were missing (suppressed)
+plot_data$Status <- ifelse(is.na(plot_data$Deaths_z), "Adjusted", "Observed")
+
+# 3. Calculate Correlation (using Spearman as you did in the corrplot)
+cor_val <- cor(plot_data$ER_annual_10k, plot_data$Death_10k, method = "spearman", use = "complete.obs")
+cor_label <- paste("Spearman Cor:", round(cor_val, 3))
+
+# 4. Generate the Scatter Plot
+ggplot(plot_data, aes(x = ER_annual_10k, y = Death_10k)) +
+  # Add points: distinct colors for Observed vs Adjusted
+  geom_point(aes(color = Status), size = 2, alpha = 0.8) +
+  
+  # Define specific colors: Solid Blue for Observed, Light Blue for Adjusted
+  scale_color_manual(values = c("Observed" = "darkblue", "Adjusted" = "lightblue")) +
+  
+  # # Add the correlation text label on the plot (top-left corner)
+  # annotate("text", 
+  #          x = min(plot_data$ER_annual_percapita_z, na.rm = TRUE), 
+  #          y = max(plot_data$Deaths, na.rm = TRUE), 
+  #          label = cor_label, 
+  #          hjust = 0, vjust = 1, size = 5, fontface = "bold") +
+  
+  # Labels and clean theme
+  labs(
+    title = "Standardized ED Visits vs. Deaths",
+    x = "ED Visits (per 10k)",
+    y = "Deaths (per 10k)"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    text = element_text(size = 11)
+  )
+```
+
+## 3.3 Scatted plot: (Yearly) Relationship Between ED Visits and Mortality [Optional]
+```{r}
+# 4. Generate the Yearly Faceted Scatter Plot
+ggplot(plot_data, aes(x = ER_annual_10k, y = Death_10k)) +
+  # Add points: distinct colors for Observed vs Adjusted
+  geom_point(aes(color = Status), size = 1.5, alpha = 0.6) +
+  
+  # Define specific colors: Solid Blue for Observed, Light Blue for Adjusted
+  scale_color_manual(values = c("Observed" = "darkblue", "Adjusted" = "lightblue")) +
+  
+  # Partition the plot by Year
+  # scales = "fixed" is standard for comparison, 
+  # but use "free" if the ranges differ drastically across years
+  facet_wrap(~ year) + 
+  
+  # Labels and clean theme
+  labs(
+    title = "Evolution of Standardized ED Visits vs. Deaths",
+    subtitle = "Comparing Observed and Adjusted Metrics across Years",
+    x = "ED Visits (per 10k)",
+    y = "Deaths (per 10k)"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    text = element_text(size = 11),
+    strip.background = element_rect(fill = "white"), # Clean facet headers
+    strip.text = element_text(face = "bold")
+  )
+```
+
+## 3.4 Scatted plot with lines (seperated by imputated and raw data): (Yearly) Relationship Between ED Visits and Mortality [Optional]
+```{r}
+# 1. Construct the plot with aligned labels
+p <- ggplot(plot_data, aes(x = ER_annual_10k, y = Death_10k, color = Status, fill = Status)) +
+  geom_point(size = 1, alpha = 0.2) +
+  
+  # 'group = Status' ensures smooth, straight vectors for each category
+  geom_smooth(aes(group = Status), 
+              method = "lm", 
+              formula = y ~ x, 
+              se = TRUE, 
+              alpha = 0.1, 
+              linewidth = 0.7) + 
+  
+  # High-Contrast Palette: Deep Navy and Vibrant Orange
+  scale_color_manual(values = c("Observed" = "#002D62", "Adjusted" = "#D35400")) +
+  scale_fill_manual(values = c("Observed" = "#002D62", "Adjusted" = "#D35400")) +
+  
+  # Aligning labels to match Trend_combined.png
+  labs(
+    x = "Emergency Department Visits (per 10k)",
+    y = "Opioid-Related Mortality (per 10k)",
+    color = "Status",
+    fill = "Status"
+  ) +
+  
+  facet_wrap(~ year) + 
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+
+# 2. Save the high-resolution artifact
+ggsave("Opioid_Trend_Analysis.png", plot = p, width = 6, height = 4.2, dpi = 300)
+
+p
+```
+
+## 3.5 Scatted plot with one combined line: (Yearly) Relationship Between ED Visits and Mortality [Optional]
+```{r}
+# 1. Construct the Unified Visualization
+# By removing 'color = Status', we treat the population as a single 'mind in motion'
+p2 <- ggplot(plot_data, aes(x = ER_annual_10k, y = Death_10k)) +
+  
+  # Layer 1: The 'Community Exposure' (Individual Points)
+  # Set to black with a low alpha to highlight the density of the lattice
+  geom_point(size = 1, alpha = 0.2, color = "black") +
+  
+  # Layer 2: The 'Whole' Regression Line
+  # This provides a single, straight mathematical vector for each facet
+  geom_smooth(
+    method = "lm", 
+    formula = y ~ x, 
+    se = TRUE, 
+    color = "black",  # Forces the line to black
+    fill = "black",   # Sets the confidence interval to a subtle grey
+    alpha = 0.1, 
+    linewidth = 0.7
+  ) + 
+  
+  # Layer 3: Temporal Faceting and Structural Refinement
+  facet_wrap(~ year) + 
+  theme_bw() +
+  theme(
+    legend.position = "none",  # Legend is no longer necessary for a unified plot
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold", size = 11),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    x = "Emergency Department Visits (per 10k)",
+    y = "Opioid-Related Mortality (per 10k)"
+  )
+
+# 2. Save the High-Resolution Artifact
+# 'ggsave' preserves the 'real straight line' for publication
+ggsave("Trend_combined.png", plot = p2, width = 6, height = 4.2, dpi = 300)
+
+p2
+```
+
+## 3.4 Scatted plot with lines (combined and raw data): (Yearly) Relationship Between ED Visits and Mortality [Optional]
+```{r}
+# 1. Construct the Comparison Visualization
+p_comparison <- ggplot(plot_data, aes(x = ER_annual_10k, y = Death_10k)) +
+  
+  # Layer 1: The 'Community Exposure' (Individual Points)
+  # Keeping points monochromatic to focus the 'mind in motion' on the lines
+  geom_point(size = 1, alpha = 0.15, color = "grey40") +
+  
+  # Layer 2: The 'Combined' Line (All data points)
+  # This represents the total population (Observed + Imputed)
+  geom_smooth(aes(color = "Combined", fill = "Combined"),
+              method = "lm", 
+              formula = y ~ x, 
+              se = TRUE, 
+              alpha = 0.1, 
+              linewidth = 0.8) +
+  
+  # Layer 3: The 'Observed Only' Line
+  # We filter the data within the aesthetic to show only 'Observed' rows
+  geom_smooth(data = subset(plot_data, Status == "Observed"),
+              aes(color = "Observed Only", fill = "Observed Only"),
+              method = "lm", 
+              formula = y ~ x, 
+              se = TRUE, 
+              alpha = 0.1, 
+              linewidth = 0.8) +
+  
+  # Layer 4: High-Contrast Alignment
+  # Using Charcoal for Observed and International Orange for Combined
+  scale_color_manual(values = c("Combined" = "#D35400", "Observed Only" = "#2C3E50")) +
+  scale_fill_manual(values = c("Combined" = "#D35400", "Observed Only" = "#2C3E50")) +
+  
+  # Standardizing the Interaction Lattice
+  facet_wrap(~ year) + 
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold", size = 11),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    title = "Comparison of Observed and Combined Opioid Mortality Trajectories",
+    x = "Emergency Department Visits (per 10k)",
+    y = "Opioid-Related Mortality (per 10k)",
+    color = "Trajectory Source",
+    fill = "Trajectory Source"
+  )
+
+# 2. Save the High-Resolution Artifact
+ggsave("obs_combined_comparison.png", plot = p_comparison, width = 6.5, height = 4.8, dpi = 300)
+
+p_comparison
+```
+
+
+
+# 4. "Hot Spot" maps
+## 4.1 [[[Figure 2]]]. Spatial Clustering of ED Visits and Methadone Distribution
+### This Figure is newly produced in R. The older one in manuscript was created by ArcGIS.
+```{r}
+# # 1. Run predictions on original data
+# predict1 <- predict(
+#   fit0$fit,
+#   newdata = fit0$imputed_df,
+#   offset = log(fit0$imputed_df$pop_CDC)
+# )
+# 
+# # Merge the predictions
+# map_data <- left_join(counties_sf, predict1, by = "County")
+
+study_counties <- df %>%
+  mutate(County = str_to_title(County)) %>%
+  distinct(County)
+
+counties_study_sf <- counties_sf %>%
+  mutate(County = str_to_title(County)) %>%
+  semi_join(study_counties, by = "County")
+
+
+spatial_summary <- df %>%
+  mutate(
+    County = str_to_title(County),
+    ER_annual_percapita = as.numeric(ER_annual_percapita),
+    METHADONE_annual_percapita = as.numeric(METHADONE_annual_percapita),
+    ed_per_10k = ER_annual_percapita * 10000
+  ) %>%
+  group_by(County) %>%
+  summarise(
+    mean_ed_per_10k = mean(ed_per_10k, na.rm = TRUE),
+    mean_methadone_percapita = mean(METHADONE_annual_percapita, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+map_fig2 <- counties_study_sf %>%
+  left_join(spatial_summary, by = "County")
+
+
+p_ed <- ggplot(map_fig2) +
+  geom_sf(aes(fill = mean_ed_per_10k), color = "white", size = 0.3) +
+  scale_fill_gradient(name = "ED visits\nper 10,000") +
+  labs(title = "A. Opioid-related ED visits") +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+
+p_methadone <- ggplot(map_fig2) +
+  geom_sf(aes(fill = mean_methadone_percapita), color = "white", size = 0.3) +
+  scale_fill_gradient(name = "Methadone\nper capita") +
+  labs(title = "B. Methadone distribution") +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+
+fig2 <- patchwork::wrap_plots(p_ed, p_methadone, ncol = 2) #+
+  # patchwork::plot_annotation(
+  #   title = "Figure 2. Spatial Distribution of ED Visits and Methadone Distribution",
+  #   subtitle = "Study counties in Northwestern Alabama, mean values across 2016–2019"
+  # )
+
+fig2
+
+
+
+```
+
+
+## 4.2 Moran's I Summary Table [Optional]
+```{r}
+library(spdep)
+
+# 1. Define the complete extraction function
+# This function pulls all five metrics required for your Table 1 structure
+extract_moran_metrics <- function(data_subset, var_name) {
+  coords <- as.matrix(data_subset[, c("X", "Y")])
+  nb <- knn2nb(knearneigh(coords, k = 4))
+  lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+  
+  # Execute the spatial test
+  test_res <- moran.test(data_subset[[var_name]], lw, zero.policy = TRUE, na.action = na.omit)
+  
+  # Extract the exact columns to match the target layout
+  data.frame(
+    Morans_Index   = test_res$estimate[1],
+    Expected_Index = test_res$estimate[2],
+    Variance       = test_res$estimate[3],
+    z_value        = test_res$statistic,
+    p_value        = test_res$p.value
+  )
+}
+
+# 2. Synthesize the data into the stacked 'Table 1' format
+moran_stacked <- plot_data %>%
+  group_by(year) %>%
+  do({
+    # Execute calculations for both variables
+    m_er    <- extract_moran_metrics(., "ER_annual_10k")
+    m_death <- extract_moran_metrics(., "Death_10k")
+    
+    # Assign the structural grouping labels
+    m_er$Variable    <- "Emergency Department Visits"
+    m_death$Variable <- "Opioid-Related Mortality"
+    
+    # Stack the rows vertically
+    bind_rows(m_er, m_death)
+  }) %>%
+  ungroup()
+
+# 3. Order and format the final manuscript table
+table_1 <- moran_stacked %>%
+  # Reorder columns to exactly match your image
+  select(Variable, Year = year, Morans_Index, Expected_Index, Variance, z_value, p_value) %>%
+  # Sort by Variable first, then Year, creating the grouped blocks
+  arrange(desc(Variable), Year) %>%
+  # Round to 4 decimal places for professional consistency
+  mutate(across(where(is.numeric), ~ round(., 4)))
+
+
+
+# Transpose the Data Architecture
+table_1_transposed <- table_1 %>%
+  # Melt the structural metrics down into a single 'Metric' column
+  pivot_longer(
+    cols = c(Morans_Index, Expected_Index, Variance, z_value, p_value),
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  # Cast the temporal lattice (Years) across the top as columns
+  pivot_wider(
+    names_from = Year,
+    values_from = Value
+  ) %>%
+  # Clean the administrative variable names for the final manuscript
+  mutate(Metric = case_when(
+    Metric == "Morans_Index"   ~ "Moran's I",
+    Metric == "Expected_Index" ~ "Expected I",
+    Metric == "Variance"       ~ "Variance",
+    Metric == "z_value"        ~ "z-value",
+    Metric == "p_value"        ~ "p-value"
+  ))
+
+table_1_transposed
+# write.csv(table_1_transposed, "Moran_ER_Death.csv")
+# 
+# getwd()
+```
+
+
+# 5. Mediation Model
+## 5.1 Imputation
+```{r}
+imputed_df <- fit0$fit$data
+imputed_df$ER_annual <- imputed_df$ER_annual_percapita * imputed_df$pop_CDC
+
+imputed_df$rural_factor <- as.factor(imputed_df$rural_factor)
+imputed_df$urban <- as.factor(7 - as.numeric(imputed_df$rural_factor))
+```
+
+## 5.5 [Final] Mediator
+
+### 5.5.0 Drugs Composite
+```{r}
+# Load necessary libraries
+library(corrplot)
+
+# Select and check correlations
+opioid_cols <- c("OXYCODONE_annual_percapita_z", "HYDROCODONE_annual_percapita", 
+                 "BUPRENORPHINE_annual_percapita_z", "METHADONE_annual_percapita_z")
+
+cor_matrix <- cor(imputed_df[, opioid_cols], use = "complete.obs")
+
+# Print matrix
+print(round(cor_matrix, 2))
+
+
+
+# 1. Select the three correlated variables
+# We scale Hydrocodone as it was not z-scored in the original matrix
+opioid_sub_data <- imputed_df %>%
+  select(OXYCODONE_annual_percapita_z, 
+         HYDROCODONE_annual_percapita, 
+         BUPRENORPHINE_annual_percapita_z) %>%
+  mutate(across(everything(), scale))
+
+# 2. Run PCA to extract the primary 'Opioid Burden' signal
+pca_opioid <- principal(opioid_sub_data, nfactors = 1)
+
+# 3. Add the composite score to your dataframe
+imputed_df$opioid_burden <- as.numeric(pca_opioid$scores)
+
+# 4. Verify loadings - ensure they are positive (High score = High Burden)
+print(pca_opioid$loadings)
+
+
+```
+
+
+
+### 5.5.0 SES Composite
+```{r}
+
+# 1. Select and Center/Scale (Z-scores)
+ses_data <- imputed_df %>%
+  select(gini_index, poverty_rate, noinsurance_rate) %>%
+  mutate(across(everything(), scale))
+
+# 2. Extract the First Principal Component
+# In 'Classic Style', we assume SES is the primary latent factor
+pca_result <- principal(ses_data, nfactors = 1)
+
+# 3. Add the SES Score back to your dataset
+# since indicators—poverty_rate, noinsurance_rate, and gini_index—all load positively on PC1 (meaning higher scores indicate more disparity). We need invert it.
+imputed_df$ses_composite <- as.numeric(pca_result$scores) * -1
+```
+
+
+
+
+
+```{r}
+# Stage 1: Predict ED Visits (M)
+# Synthesizing OUD and SES to capture the non-linear temporal trajectory
+form_mediator <- ER_annual ~
+  (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + HYDROCODONE_annual_percapita_z + METHADONE_annual_percapita_z) * (rural_factor + gini_index_z + poverty_rate_z + noinsurance_rate_z + time_index)
+
+
+form_mediator <- ER_annual ~
+  (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + HYDROCODONE_annual_percapita_z + METHADONE_annual_percapita_z) * (rural_factor + gini_index_z + poverty_rate_z + noinsurance_rate_z + time_index + I(time_index^2))
+
+
+# Stage 2: Predict Mortality (Y)
+# Testing b-path moderation across an accelerating or decelerating timeline
+# form_outcome <- Deaths ~
+#   ER_annual_percapita_z * (rural_factor + ses_composite + time_index) +   opioid_burden + METHADONE_annual_percapita_z
+
+# form_outcome <- Deaths ~
+#   OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + HYDROCODONE_annual_percapita_z + METHADONE_annual_percapita_z + ER_annual_percapita_z * (rural_factor + gini_index_z + poverty_rate_z + noinsurance_rate_z + time_index)
+  
+
+form_outcome <- Deaths ~
+  OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + HYDROCODONE_annual_percapita_z + METHADONE_annual_percapita_z + ER_annual_percapita_z * (rural_factor + gini_index_z + poverty_rate_z + noinsurance_rate_z + time_index + I(time_index^2))
+
+```
+
+
+
+```{r}
+fit_mediator <- sdmTMB(
+  formula = form_mediator,
+  data    = imputed_df,
+  mesh    = mesh,
+  family  = nbinom2(link = "log"), # Changed from poisson
+  #spatial = "on",
+  spatial = "off",
+  offset  = "log_pop",
+  priors  = sdmTMBpriors(matern_s = pc_matern(range_gt = 10, sigma_lt = 2))
+)
+
+
+# Fit the outcome model similarly
+fit_outcome <- sdmTMB(
+  formula = form_outcome,
+  data    = imputed_df,
+  mesh    = mesh,
+  family  = nbinom2(link = "log"), # Changed from poisson
+  #spatial = "on",
+  spatial = "off",
+  offset  = "log_pop",
+  priors  = sdmTMBpriors(matern_s = pc_matern(range_gt = 10, sigma_lt = 2))
+)
+
+
+```
+
+
+
+### 5.5.1 [[[Table 3]]]. Medication-Specific Associations from Spatiotemporal Model
+```{r}
+# 1. Extract the fixed effects for each model
+# Using conf.int = TRUE will also calculate the 95% CIs if you need them later
+tidy_med <- tidy(fit_mediator, conf.int = TRUE) %>%
+  mutate(Model = "Mediator (Rural Base)")
+
+# tidy_med_urb <- tidy(fit_mediator_urban, conf.int = TRUE) %>%
+#   mutate(Model = "Mediator (Urban Base)")
+
+tidy_out <- tidy(fit_outcome, conf.int = TRUE) %>%
+  mutate(Model = "Outcome (Mortality)")
+
+# 2. Combine the rows into one dataset
+#all_models <- bind_rows(tidy_med, tidy_med_urb, tidy_out)
+all_models <- bind_rows(tidy_med, tidy_out)
+
+# 3. Format the estimates and standard errors (independent of stars)
+formatted_models <- all_models %>%
+  mutate(
+    # Calculate the z-statistic and p-value
+    z_val = estimate / std.error,
+    p_val = 2 * pnorm(-abs(z_val)),
+    
+    # Assign stars based on the p-value
+    stars = case_when(
+      p_val < 0.001 ~ "***",
+      p_val < 0.01  ~ "**",
+      p_val < 0.05  ~ "*",
+      p_val < 0.1   ~ ".",
+      TRUE          ~ ""
+    ),
+    
+    # Format numbers ONLY: e.g., "-0.08 (0.25)"
+    Result = sprintf("%.2f (%.2f)", estimate, std.error)
+  ) %>%
+  dplyr::select(term, Model, Result, stars)
+
+# 4. Pivot the table to create paired columns for Result and stars per model
+final_table <- formatted_models %>%
+  pivot_wider(
+    names_from = Model,
+    values_from = c(Result, stars),
+    names_glue = "{Model}_{.value}", # Automatically names columns (e.g., "BaseModel_Result", "BaseModel_stars")
+    values_fill = list(Result = "-", stars = "") # Assigns appropriate blank values for missing data
+  )
+
+
+# 5. Print the table
+kable(final_table, align = "l")
+
+# Optional: You can add a note at the bottom of your markdown or CSV 
+# explaining the legend: *** p < 0.001, ** p < 0.01, * p < 0.05,. p < 0.1
+
+# Save the table to your current working directory
+#write.csv(final_table, "moderated_mediation_results.csv", row.names = FALSE)
+#write.csv(final_table, "moderated_mediation_results_quadratic.csv", row.names = FALSE)
+```
+
+
+
+
+### 5.5.2 Adjusting for Distributional Assumptions (Overdispersion)
+```{r}
+# 2. Check Assumptions using DHARMa residuals
+library(DHARMa)
+# Simulate from the joint precision matrix to test residuals
+sim_res_med <- simulate(fit_mediator, nsim = 500, type = "mle-mvn")
+dharma_residuals(sim_res_med, fit_mediator)
+```
+
+
+# 6. Shiny
+
+```{r}
+# 4. Save this object specifically for the Shiny App
+save(final_fit, df, file = "best_model.RData")
+
+load(paste0(repos,"/Data/best_model.RData"))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

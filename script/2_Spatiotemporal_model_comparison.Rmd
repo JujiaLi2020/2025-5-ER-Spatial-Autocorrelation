@@ -1,0 +1,450 @@
+---
+title: "Delta-model comparison for ER opioid data"
+output: html_notebook
+---
+
+# Setup
+
+```{r echo=FALSE}
+#| label: setup
+#| include: false
+# Core
+library(dplyr)
+library(tidyr)
+library(readr)
+library(ggplot2)
+library(lubridate)
+
+# Spatial + modeling
+library(sf)
+library(tigris)
+options(tigris_use_cache = TRUE)
+library(sdmTMB)
+library(DHARMa)
+
+# Helper (pipe-like null coalesce)
+`%||%` <- function(a,b) if (!is.null(a)) a else b
+```
+
+## 1. Data Preparation
+
+### 1.1 Load & filter data
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+file_path <- "Data/ER_opioid_2016_2019_cleaned.csv"
+if (!file.exists(file_path)) {
+  stop("File not found: Data/ER_opioid_2016_2019_cleaned.csv")
+}
+er_data <- read_csv(file_path, show_col_types = FALSE)
+
+# Keep a subset of North / Central AL (as in your script)
+keep_cnty <- toupper(c(
+  "Lauderdale","Limestone","Madison","Jackson","Colbert","Franklin",
+  "Lawrence","Morgan","Marshall","Dekalb","Marion","Winston",
+  "Cullman","Blount","Etowah","Cherokee","Lamar","Fayette",
+  "Walker","Jefferson","St. Clair","Pickens","Tuscaloosa","Shelby"
+))
+
+er_data <- er_data |>
+  mutate(County = toupper(County),
+         Date = as.Date(Date)) |>
+  filter(County %in% keep_cnty)
+```
+
+### 1.2 Monthly aggregation
+
+```{r, message=FALSE, warning=FALSE}
+# Presence at daily level
+er_data <- er_data |>
+  mutate(
+    year = year(Date),
+    presence = if_else(Count > 0, 1L, 0L)
+  )
+
+# Aggregate to county × year × month
+er_month <- er_data |>
+  group_by(County, year, month = month(Date)) |>
+  summarise(
+    Count = sum(Count, na.rm = TRUE),
+    pop = mean(pop, na.rm = TRUE),
+    presence = if_else(sum(Count, na.rm = TRUE) > 0, 1L, 0L),
+    case_percapita = Count / pop,
+    .groups = "drop"
+  )
+
+# Build cyclic seasonality + time index (1..T)
+er_month <- er_month |>
+  arrange(year, month, County) |>
+  mutate(
+    year_c   = as.numeric(scale(year, center = TRUE, scale = FALSE)),
+    month_sin = sin(2*pi*month/12),
+    month_cos = cos(2*pi*month/12),
+    log_pop  = log(pmax(pop, 1)),
+    year_month = paste(year, month, sep = "-"),
+    time_index = match(year_month, sort(unique(year_month)))
+  )
+```
+
+### 1.3 County geometry & coordinates
+
+```{r, message=FALSE, warning=FALSE}
+# AL counties in UTM 16N (meters), then convert to km numeric coords
+counties_sf <- tigris::counties(state = "AL", cb = TRUE, year = 2023) |>
+  st_transform(26916) |>
+  mutate(County = toupper(NAME))
+
+coords_m  <- st_coordinates(st_centroid(st_geometry(counties_sf)))
+county_xy <- counties_sf |>
+  st_drop_geometry() |>
+  transmute(
+    County,
+    X = coords_m[, "X"] / 1000,  # km
+    Y = coords_m[, "Y"] / 1000
+  )
+
+# Merge coords into model frame
+df_month <- er_month |>
+  left_join(county_xy, by = "County") |>
+  filter(is.finite(X), is.finite(Y), is.finite(log_pop))
+```
+
+### 1.4 Mesh (built on the data actually modeled)
+
+```{r, message=FALSE, warning=FALSE}
+# Cutoff ~ 10% of X-range in km (tune if too coarse/fine)
+mesh <- make_mesh(
+  df_month,
+  xy_cols = c("X","Y"),
+  cutoff = diff(range(df_month$X, na.rm = TRUE)) / 10
+)
+```
+
+## 2. ER Visit Spatiotemporal Modeling Comparison
+
+### 2.1 Model grid: seasonality × family × ST structure
+
+```{r, message=FALSE, warning=FALSE}
+seasonality_list <- list(
+  sincos = Count ~ year_c + month_sin + month_cos,
+  facmon = Count ~ year_c + factor(month)
+)
+
+spatiotemporal_opts <- list(
+  off   = list(spatial="off", spatiotemporal="off"),
+  space = list(spatial="on",  spatiotemporal="off"),
+  iid   = list(spatial="on",  spatiotemporal="iid"),
+  ar1   = list(spatial="on",  spatiotemporal="ar1")
+)
+
+families <- list(
+  NB2     = delta_truncated_nbinom2(link1="logit", link2="log"),
+  NB1     = delta_truncated_nbinom1(link1="logit", link2="log"),
+  Gamma   = delta_gamma(link1="logit", link2="log"),
+  Lognorm = delta_lognormal(link1="logit", link2="log")
+)
+
+# Fit all combos (skip failures)
+model_results <- list(); i <- 1
+for (sname in names(seasonality_list)) {
+  form <- seasonality_list[[sname]]
+  for (fname in names(families)) {
+    fam <- families[[fname]]
+    for (spname in names(spatiotemporal_opts)) {
+      opts <- spatiotemporal_opts[[spname]]
+      message("Fitting: ", sname, " | ", fname, " | ", spname)
+      fit <- try(sdmTMB(
+        form,
+        data = df_month,
+        mesh = mesh,
+        family = fam,
+        spatial = opts$spatial,
+        spatiotemporal = opts$spatiotemporal,
+        time = if (opts$spatiotemporal %in% c("iid","ar1")) "time_index" else NULL,
+        offset = df_month$log_pop
+      ), silent = TRUE)
+      if (!inherits(fit, "try-error")) {
+        model_results[[i]] <- list(
+          season = sname, family = fname, space = spname,
+          fit = fit,
+          AIC = AIC(fit),
+          logLik = as.numeric(logLik(fit)),
+          npar = attr(logLik(fit), "df")
+        )
+        i <- i + 1
+      }
+    }
+  }
+}
+
+aic_table <- do.call(rbind, lapply(model_results, function(x) {
+  data.frame(season = x$season, family = x$family, space = x$space,
+             AIC = x$AIC, logLik = x$logLik, npar = x$npar)
+})) |>
+  arrange(AIC) |>
+  mutate(DeltaAIC = AIC - min(AIC))
+```
+
+```{r, message=FALSE, warning=FALSE}
+knitr::kable(aic_table, caption = "AIC comparison table")
+```
+
+*Note.*
+
+**Season:**
+
+-   sincos: Seasonal pattern represented using sine–cosine terms, capturing smooth cyclical effects across months.
+
+-   facmon: Month treated as a categorical factor, allowing each month to have its own effect without assuming smoothness.
+
+**Family:**
+
+-   NB1 / NB2: Negative binomial distributions with different variance parameterizations. NB1 assumes variance grows linearly with the mean, while NB2 assumes quadratic growth.
+
+-   Gamma: Models positive continuous outcomes with right skew.
+
+-   Lognormal: Assumes the log of the outcome is normally distributed, useful for heavily skewed counts.
+
+**Space:**
+
+-   space = "ar1" are the most flexible (space + time dependence).
+
+-   space = "iid" captures space but assumes time slices are independent.
+
+-   space = "space" is spatial only (no time).
+
+-   space = "off" ignores spatial structure entirely.
+
+### 2.2 ΔAIC heatmap
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(aic_table, aes(family, season, fill = DeltaAIC)) +
+  geom_tile(color = "white") +
+  facet_wrap(~ space) +
+  scale_fill_viridis_c() +
+  labs(title = "ΔAIC across model specifications",
+       x = "Family (positive component)", y = "Seasonality") +
+  theme_minimal()
+```
+
+### 2.3 Top Two models (Lowest AIC) & run DHARMa
+
+```{r, message=FALSE, warning=FALSE}
+# Identify top two by AIC
+top2 <- head(aic_table, 2)
+top2
+
+# Extract their fits
+get_fit <- function(season, family, space) {
+  for (mr in model_results) {
+    if (mr$season == season && mr$family == family && mr$space == space) return(mr$fit)
+  }
+  NULL
+}
+
+fit1 <- get_fit(top2$season[1], top2$family[1], top2$space[1])
+fit2 <- get_fit(top2$season[2], top2$family[2], top2$space[2])
+
+# DHARMa helper for delta models (uses est1/est2)
+check_dharma <- function(fit, df, offset_vec, nsim = 250, title = NULL) {
+  sim <- simulate(fit, nsim = nsim)
+  pp  <- predict(fit, newdata = df, offset = offset_vec)
+  stopifnot(all(c("est1","est2") %in% names(pp)))
+  mu  <- plogis(pp$est1) * exp(pp$est2)
+  dh  <- DHARMa::createDHARMa(simulatedResponse = sim,
+                              observedResponse  = df$Count,
+                              fittedPredicted   = mu)
+  if (!is.null(title)) message(title)
+  plot(dh)
+  print(testUniformity(dh))
+  print(testDispersion(dh))
+  print(testOutliers(dh))
+  invisible(list(dh = dh, mu = mu))
+}
+
+# Run diagnostics (plots appear below)
+if (!is.null(fit1)) dh1 <- check_dharma(fit1, df_month, df_month$log_pop,
+                                        title = paste(top2$season[1], top2$family[1], top2$space[1], sep=" | "))
+if (!is.null(fit2)) dh2 <- check_dharma(fit2, df_month, df_month$log_pop,
+                                        title = paste(top2$season[2], top2$family[2], top2$space[2], sep=" | "))
+```
+
+### 2.4 Seasonality curves
+
+```{r, message=FALSE, warning=FALSE}
+# --- BEGIN: safe seasonality curves chunk ---
+
+# Helper: fetch a fit from model_results by keys
+get_fit <- function(season, family, space) {
+  for (mr in model_results) {
+    if (mr$season == season && mr$family == family && mr$space == space) return(mr$fit)
+  }
+  NULL
+}
+
+# 1) Try to grab NB1 + AR1 for both seasonality specs from the grid:
+fit_facmon_nb1_ar1 <- get_fit("facmon", "NB1", "ar1")
+fit_sincos_nb1_ar1 <- get_fit("sincos", "NB1", "ar1")
+
+# 2) If missing, refit explicitly (uses df_month consistently):
+if (is.null(fit_facmon_nb1_ar1)) {
+  fit_facmon_nb1_ar1 <- try(sdmTMB(
+    Count ~ year_c + factor(month),
+    data = df_month, mesh = mesh,
+    family = delta_truncated_nbinom1(link1 = "logit", link2 = "log"),
+    spatial = "on", spatiotemporal = "ar1", time = "time_index",
+    offset = df_month$log_pop
+  ), silent = TRUE)
+  if (inherits(fit_facmon_nb1_ar1, "try-error")) fit_facmon_nb1_ar1 <- NULL
+}
+
+if (is.null(fit_sincos_nb1_ar1)) {
+  fit_sincos_nb1_ar1 <- try(sdmTMB(
+    Count ~ year_c + month_sin + month_cos,
+    data = df_month, mesh = mesh,
+    family = delta_truncated_nbinom1(link1 = "logit", link2 = "log"),
+    spatial = "on", spatiotemporal = "ar1", time = "time_index",
+    offset = df_month$log_pop
+  ), silent = TRUE)
+  if (inherits(fit_sincos_nb1_ar1, "try-error")) fit_sincos_nb1_ar1 <- NULL
+}
+
+# If neither model is available, stop with a clear message
+if (is.null(fit_facmon_nb1_ar1) && is.null(fit_sincos_nb1_ar1)) {
+  stop("Neither facmon+NB1+AR1 nor sincos+NB1+AR1 could be found or refit. Check the model grid and data.")
+}
+
+# 3) Build baseline newdata at a valid time; add required cols
+ref_time <- max(df_month$time_index, na.rm = TRUE)
+newdat_base <- data.frame(
+  year_c     = 0,
+  time_index = ref_time,
+  X          = mean(df_month$X, na.rm = TRUE),
+  Y          = mean(df_month$Y, na.rm = TRUE)
+)
+
+# 4) Predict curves per 100k with correct offset length and fixed-effects only
+curve_dfs <- list()
+
+# factor(month) curve
+if (!is.null(fit_facmon_nb1_ar1)) {
+  new_fac <- tidyr::crossing(newdat_base, month = 1:12)
+  off_fac <- rep(log(1e5), nrow(new_fac))
+  pp_fac  <- predict(fit_facmon_nb1_ar1, newdata = new_fac, offset = off_fac, re_form = NA)
+  inc_fac <- plogis(pp_fac$est1) * exp(pp_fac$est2)
+  curve_dfs[["fac"]] <- data.frame(model = "factor(month)", month = 1:12, inc_100k = inc_fac)
+}
+
+# sin+cos curve
+if (!is.null(fit_sincos_nb1_ar1)) {
+  new_sc <- tidyr::crossing(newdat_base, month = 1:12) |>
+    dplyr::mutate(
+      month_sin = sin(2*pi*month/12),
+      month_cos = cos(2*pi*month/12)
+    )
+  off_sc <- rep(log(1e5), nrow(new_sc))
+  pp_sc  <- predict(fit_sincos_nb1_ar1, newdata = new_sc, offset = off_sc, re_form = NA)
+  inc_sc <- plogis(pp_sc$est1) * exp(pp_sc$est2)
+  curve_dfs[["sc"]] <- data.frame(model = "sin+cos", month = 1:12, inc_100k = inc_sc)
+}
+
+plot_dat <- dplyr::bind_rows(curve_dfs)
+
+ggplot(plot_dat, aes(month, inc_100k, color = model)) +
+  geom_line(linewidth = 1) + geom_point() +
+  scale_x_continuous(breaks = 1:12) +
+  labs(x = "Month", y = "Predicted incidence per 100,000",
+       title = "Seasonal effect: factor(month) vs sin+cos",
+       color = "Spec") +
+  theme_minimal()
+```
+
+### 2.5 Delta maps (presence, positive mean, overall expected)
+
+```{r, message=FALSE, warning=FALSE}
+# --- Predict per 100k ---
+
+# 1) Predict using offset = log(100k) for every row
+pred <- predict(
+  fit_sincos_nb1_ar1,          # or whichever fit you prefer
+  newdata = df_month,
+  offset  = rep(log(1e5), nrow(df_month))
+)
+
+# 2) Attach delta components (per 100k basis now)
+df_with_pred <- df_month %>%
+  mutate(
+    p_presence = plogis(pred$est1),    # probability of >0
+    mu_pos     = exp(pred$est2),       # expected count given >0, per 100k
+    mu_total   = p_presence * mu_pos   # overall expected, per 100k
+  )
+
+# 3) Summarise to county averages
+map_pred <- df_with_pred %>%
+  group_by(County) %>%
+  summarise(
+    pr_presence = mean(p_presence, na.rm = TRUE),
+    exp_pos     = mean(mu_pos,     na.rm = TRUE),
+    exp_total   = mean(mu_total,   na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# 4) Join with county polygons
+map_dat <- counties_sf %>%
+  mutate(County = toupper(County)) %>%
+  left_join(map_pred %>% mutate(County = toupper(County)), by = "County") %>%
+  filter(County %in% toupper(c(
+    "Lauderdale", "Limestone", "Madison", "Jackson", "Colbert", "Franklin",
+    "Lawrence", "Morgan", "Marshall", "Dekalb", "Marion", "Winston",
+    "Cullman", "Blount", "Etowah", "Cherokee", "Lamar", "Fayette",
+    "Walker", "Jefferson", "St. Clair", "Pickens", "Tuscaloosa", "Shelby"
+  )))
+
+# 5) Maps: presence prob, conditional mean, total expected incidence (per 100k)
+
+p1 <- ggplot(map_dat) +
+  geom_sf(aes(fill = pr_presence), color = "white", size = 0.2) +
+  geom_sf_text(
+    data = map_dat,
+    aes(label = County, color = pr_presence < 0.5),
+    size = 3
+  ) +
+  scale_color_manual(values = c("black", "white"), guide = "none") +
+  scale_fill_viridis_c(limits = c(0, 1)) +
+  labs(fill="Pr(presence)", title="Delta NB1 AR1 – presence probability") +
+  theme_void()
+
+p2 <- ggplot(map_dat) +
+  geom_sf(aes(fill = exp_pos), color="white", size=0.2) +
+  geom_sf_text(
+    data = map_dat,
+    aes(label = County, color = exp_pos < 30),  # threshold still works, now per 100k
+    size = 3
+  ) +
+  scale_color_manual(values = c("black", "white"), guide = "none") +
+  scale_fill_viridis_c(option="plasma") +
+  labs(fill="Mean | presence (per 100k)",
+       title="Delta NB1 AR1 – expected incidence given presence") +
+  theme_void()
+
+p3 <- ggplot(map_dat) +
+  geom_sf(aes(fill = exp_total), color="white", size=0.2) +
+  geom_sf_text(
+    data = map_dat,
+    aes(label = County, color = exp_total < 5),
+    size = 3
+  ) +
+  scale_color_manual(values = c("black", "white"), guide = "none") +
+  scale_fill_viridis_c(option="magma") +
+  labs(fill="Expected (per 100k)",
+       title="Delta NB1 AR1 – overall expected incidence (per 100k)") +
+  theme_void()
+
+p1; p2; p3
+
+```
+
+The delta framework separates the probability of opioid-related ER visits from the expected incidence conditional on occurrence. Mapping these components revealed that some counties (e.g., Blount, Walker) had consistently high presence probability, while others (e.g., Franklin, Cherokee) showed elevated incidence only when events occurred. This decomposition helps distinguish between widespread low-level burden and localized high-intensity spikes.
+
+The delta model identified substantial spatial heterogeneity in opioid-related ER incidence across northern Alabama. Franklin County exhibited the highest expected rate (\>12 per 100,000), followed by Blount, Walker, Lawrence, and Cherokee counties. In contrast, populous counties such as Jefferson and Madison showed relatively low per-capita incidence (\<5 per 100,000). These results suggest that burden is disproportionately concentrated in smaller northern counties despite lower absolute case counts.
+
+We fit a grid of delta models crossing seasonal structure (sin–cos vs. factor month), positive components (truncated NB1, NB2, gamma, lognormal), and spatiotemporal structure (spatial off/on; ST off/iid/AR1). Model comparison by AIC favored NB1 with AR1 spatiotemporal dependence; seasonality encoded via sin–cos performed nearly as well as factor(month) with substantially fewer parameters. Delta decomposition maps indicated (i) northern counties had high probability of presence (endemicity), (ii) a subset of counties exhibited elevated conditional counts (episodic intensity), and (iii) the overall expected map highlighted areas combining both features.

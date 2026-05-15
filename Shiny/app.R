@@ -15,9 +15,9 @@ library(DHARMa)
 #   models_ER.RData: df_ER, fits_ER               (ER models)
 #   aic_table_coef_ER.rds: aic_table_coef_ER
 # ------------------------------------------------------------------
-load("models.RData")          # df, fits, aic_table_coef
-load("models_ER.RData")       # df_ER, fits_ER  (adjust if different)
-aic_table_coef_ER <- readRDS("aic_table_coef_ER.rds")
+load("../Shiny/models.RData")          # df, fits, aic_table_coef
+load("../Shiny/models_ER.RData")       # df_ER, fits_ER  (adjust if different)
+aic_table_coef_ER <- readRDS("../Shiny/aic_table_coef_ER.rds")
 
 # sanity check (optional)
 stopifnot(

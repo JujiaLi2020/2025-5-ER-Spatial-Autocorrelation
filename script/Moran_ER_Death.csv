@@ -1,0 +1,11 @@
+"","Variable","Metric","2016","2017","2018","2019"
+"1","Opioid-Related Mortality","Moran's I",0.3331,0.1406,0.3582,0.0874
+"2","Opioid-Related Mortality","Expected I",-0.0476,-0.0476,-0.0476,-0.0476
+"3","Opioid-Related Mortality","Variance",0.0134,0.0138,0.0157,0.0141
+"4","Opioid-Related Mortality","z-value",3.2945,1.5997,3.2414,1.1366
+"5","Opioid-Related Mortality","p-value",5e-04,0.0548,6e-04,0.1279
+"6","Emergency Department Visits","Moran's I",-0.1179,-0.0998,0.0024,0.2949
+"7","Emergency Department Visits","Expected I",-0.0476,-0.0476,-0.0476,-0.0476
+"8","Emergency Department Visits","Variance",0.0154,0.016,0.0163,0.0153
+"9","Emergency Department Visits","z-value",-0.5666,-0.4117,0.3915,2.7654
+"10","Emergency Department Visits","p-value",0.7145,0.6597,0.3477,0.0028

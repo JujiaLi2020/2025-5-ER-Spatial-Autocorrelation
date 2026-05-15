@@ -1,0 +1,37 @@
+term,Opioid Burden to ED (a-path),Outcome Models (b & c' paths)
+(Intercept),-7.45 (0.32) ***,-8.82 (0.28) ***
+opioid_burden,-0.94 (0.40) *,-0.01 (0.11) 
+METHADONE_annual_percapita_z,0.98 (0.36) **,-0.10 (0.11) 
+rural_factor3,0.34 (0.49) ,-0.95 (0.38) *
+rural_factor4,0.18 (0.44) ,-0.52 (0.32) .
+rural_factor5,0.15 (0.41) ,-0.29 (0.33) 
+rural_factor6,0.73 (0.44) .,-0.62 (0.33) .
+gini_index_z,0.17 (0.14) ,0.02 (0.12) 
+poverty_rate_z,0.19 (0.22) ,-0.08 (0.18) 
+noinsurance_rate_z,-0.15 (0.11) ,-0.11 (0.13) 
+time_index,0.05 (0.07) ,-0.05 (0.04) 
+opioid_burden:rural_factor3,2.17 (0.64) ***,-
+opioid_burden:rural_factor4,0.54 (0.46) ,-
+opioid_burden:rural_factor5,-0.46 (0.71) ,-
+opioid_burden:rural_factor6,0.32 (0.44) ,-
+opioid_burden:gini_index_z,-0.62 (0.23) **,-
+opioid_burden:poverty_rate_z,0.70 (0.37) .,-
+opioid_burden:noinsurance_rate_z,0.17 (0.11) ,-
+opioid_burden:time_index,0.10 (0.05) *,-
+METHADONE_annual_percapita_z:rural_factor3,-1.19 (0.47) *,-
+METHADONE_annual_percapita_z:rural_factor4,-1.10 (0.40) **,-
+METHADONE_annual_percapita_z:rural_factor5,0.36 (0.44) ,-
+METHADONE_annual_percapita_z:rural_factor6,-1.20 (0.41) **,-
+METHADONE_annual_percapita_z:gini_index_z,0.55 (0.21) **,-
+METHADONE_annual_percapita_z:poverty_rate_z,-0.26 (0.26) ,-
+METHADONE_annual_percapita_z:noinsurance_rate_z,-0.24 (0.11) *,-
+METHADONE_annual_percapita_z:time_index,-0.06 (0.06) ,-
+ER_annual_percapita_z,-,-0.00 (0.26) 
+ER_annual_percapita_z:rural_factor3,-,-0.13 (0.29) 
+ER_annual_percapita_z:rural_factor4,-,0.17 (0.31) 
+ER_annual_percapita_z:rural_factor5,-,0.10 (0.44) 
+ER_annual_percapita_z:rural_factor6,-,0.13 (0.32) 
+ER_annual_percapita_z:gini_index_z,-,0.04 (0.15) 
+ER_annual_percapita_z:poverty_rate_z,-,0.14 (0.15) 
+ER_annual_percapita_z:noinsurance_rate_z,-,-0.26 (0.13) .
+ER_annual_percapita_z:time_index,-,-0.04 (0.06) 

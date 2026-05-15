@@ -1,0 +1,1253 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## 1. Preparation
+### 1.1 Setup
+
+```{r echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(readr)
+library(ggplot2)
+library(lubridate)
+library(stringr)
+library(janitor)
+library(GGally)
+# Spatial + modeling
+library(sf)
+library(tigris)
+options(tigris_use_cache = TRUE)
+library(sdmTMB)
+library(DHARMa)
+library(broom)
+library(purrr)
+```
+
+### 1.2 Data Preparation
+```{r , message=FALSE, warning=FALSE}
+file_path <- "Data/ER_opioid_2016_2019_cleaned.csv"
+if (!file.exists(file_path)) {
+  stop("File not found: Data/ER_opioid_2016_2019_cleaned.csv")
+}
+er_data <- read_csv(file_path, show_col_types = FALSE)
+
+# Keep a subset of North / Central AL (as in your script)
+keep_cnty <- toupper(c(
+  "Lauderdale","Limestone","Madison","Jackson","Colbert","Franklin",
+  "Lawrence","Morgan","Marshall","Dekalb","Marion","Winston",
+  "Cullman","Blount","Etowah","Cherokee","Lamar","Fayette",
+  "Walker","Jefferson","St. Clair","Pickens","Tuscaloosa","Shelby"
+))
+
+er_data <- er_data |>
+  mutate(County = toupper(County),
+         Date = as.Date(Date)) |>
+  filter(County %in% keep_cnty)
+
+
+# Read Data_ARCOS and clean for next process
+Data_ARCOS <- read_csv("Data/ARCOS_AL_2016_2019_cleaned.csv")
+
+Data_ARCOS_filted <- Data_ARCOS%>%
+  filter(drug %in% c("OXYCODONE", "HYDROCODONE", "BUPRENORPHINE", "METHADONE"))%>%
+  filter(county %in% toupper(c(
+    "Lauderdale", "Limestone", "Madison", "Jackson", "Colbert", "Franklin",
+    "Lawrence", "Morgan", "Marshall", "Dekalb", "Marion", "Winston",
+    "Cullman", "Blount", "Etowah", "Cherokee", "Lamar", "Fayette",
+    "Walker", "Jefferson", "St. Clair", "Pickens", "Tuscaloosa", "Shelby"
+  ))
+  )%>%
+  #mutate(mme = mme/1000000)%>%
+  mutate(Date = mdy(date))%>%
+  mutate(County = toupper(county))
+
+arcos_wide_mme <- Data_ARCOS_filted %>%
+  pivot_wider(
+    id_cols    = c(County, Date),
+    names_from = drug,
+    values_from= mme,
+    values_fill = 0
+  )
+
+df_er_drug <- left_join(
+  er_data,
+  arcos_wide_mme,
+  by = c("County", "Date")
+)
+
+```
+
+
+### 1.3 ER and Drugs Annually aggregation + covariates
+```{r, message=FALSE, warning=FALSE}
+# Presence at daily level
+df_er_drug <- df_er_drug |>
+  mutate(
+    year = year(Date),
+    presence = if_else(Count > 0, 1L, 0L)
+  )
+
+# Aggregate to county × year
+df_er_drug_annual <- df_er_drug %>%
+  group_by(County, year) %>%
+  summarise(
+    # population for the year (choose one: mean/first/median)
+    pop_year = first(pop),
+
+    # ER annual
+    ER_annual = sum(Count, na.rm = TRUE),
+
+    # Drug annual
+    OXYCODONE_annual     = sum(OXYCODONE,     na.rm = TRUE),
+    HYDROCODONE_annual   = sum(HYDROCODONE,   na.rm = TRUE),
+    BUPRENORPHINE_annual = sum(BUPRENORPHINE, na.rm = TRUE),
+    METHADONE_annual     = sum(METHADONE,     na.rm = TRUE),
+
+    presence = as.integer(sum(Count, na.rm = TRUE) > 0),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # per-capita (proportion) and per 100k (common epidemiology scale)
+    ER_annual_percapita           = ER_annual / pop_year,
+    ER_annual_per100k             = ER_annual_percapita * 1e5,
+
+    OXYCODONE_annual_percapita    = OXYCODONE_annual     / pop_year,
+    OXYCODONE_annual_per100k      = OXYCODONE_annual_percapita * 1e5,
+
+    HYDROCODONE_annual_percapita  = HYDROCODONE_annual   / pop_year,
+    HYDROCODONE_annual_per100k    = HYDROCODONE_annual_percapita * 1e5,
+
+    BUPRENORPHINE_annual_percapita = BUPRENORPHINE_annual / pop_year,
+    BUPRENORPHINE_annual_per100k   = BUPRENORPHINE_annual_percapita * 1e5,
+
+    METHADONE_annual_percapita    = METHADONE_annual     / pop_year,
+    METHADONE_annual_per100k      = METHADONE_annual_percapita * 1e5
+  )
+```
+
+### 1.4 CDC Opioid-related Mortality Read and Prepare 
+```{r, message=FALSE, warning=FALSE}
+mortality <- read_csv("Data/CDCWonder Opioid Related Mortality AL 2016-2019.csv")
+
+mortality_filted <- mortality%>%
+  mutate(County = toupper(gsub(" County, AL", "", County)))%>%
+  filter(County %in% toupper(c(
+    "Lauderdale", "Limestone", "Madison", "Jackson", "Colbert", "Franklin",
+    "Lawrence", "Morgan", "Marshall", "Dekalb", "Marion", "Winston",
+    "Cullman", "Blount", "Etowah", "Cherokee", "Lamar", "Fayette",
+    "Walker", "Jefferson", "St. Clair", "Pickens", "Tuscaloosa", "Shelby"
+  )))%>%
+  mutate(
+    Deaths = suppressWarnings(as.numeric(Deaths)),      # "Suppressed" → NA
+    CrudeRate = suppressWarnings(as.numeric(CrudeRate)),
+    deaths_per100k = Deaths / Population * 1e5
+  )%>%
+  rename(year = Year,
+         pop_CDC=Population)
+
+
+# Merge
+df_er_drug_mortality <- left_join(
+  df_er_drug_annual,
+  mortality_filted,
+  by = c("County", "year")
+)
+
+
+```
+
+
+
+### 1.5 ACS Data Read and Prepare 
+```{r , message=FALSE, warning=FALSE}
+acs <- read_csv("Data/ACS 2019 Data Subset.csv")
+
+# 1) Build a safe, readable column name from Concept + Label
+clean_colname <- function(concept, label) {
+  # drop leading "Estimate!!"
+  label2 <- str_remove(label, "^Estimate!!")
+  # collapse "!!" / ":" and other punctuation to separators
+  label2 <- str_replace_all(label2, "!!", "_")
+  label2 <- str_replace_all(label2, "[:;,-]+", "")
+  # build combined name, then snake case + de-duplicate
+  nm <- paste(concept, label2, sep = "__")
+  # nm <- janitor::make_clean_names(nm)
+  nm
+}
+
+acs2 <- acs %>%
+  mutate(
+    colname = clean_colname(Concept, Label)
+  )
+
+# 2) If there are duplicates per (State, County, Full_FIPS, colname), choose the first non-NA
+acs_collapsed <- acs2 %>%
+  group_by(State, County, Full_FIPS, colname) %>%
+  summarise(Value = dplyr::first(na.omit(Value)), .groups = "drop")
+
+
+# 3) Pivot to wide
+acs_wide <- acs_collapsed %>%
+  pivot_wider(
+    id_cols    = c(State, County, Full_FIPS),
+    names_from = colname,
+    values_from = Value,
+    values_fill = NA_real_
+  ) %>%
+  clean_names()%>%
+  mutate(CountyCode = full_fips)# final pass to ensure valid names
+
+# Merge three imputated mortality
+df_er_drug_mortality_acs <- left_join(
+  df_er_drug_mortality,
+  acs_wide,
+  by = c("CountyCode")
+  )
+#summary(mortality_filted)
+
+
+```
+
+
+#### 1.5.1 Select Predictors in ACS
+```{r , message=FALSE, warning=FALSE}
+df_er_drug_mortality_acs <- df_er_drug_mortality_acs%>%
+  mutate(
+    unemployee_rate = employment_status_for_the_population_16_years_and_over_total_in_labor_force_civilian_labor_force_unemployed/employment_status_for_the_population_16_years_and_over_total_in_labor_force_civilian_labor_force,
+    
+    gini_index = gini_index_of_income_inequality_gini_index,
+         
+    median_income = median_household_income_in_the_past_12_months_in_2021_inflation_adjusted_dollars_median_household_income_in_the_past_12_months_in_2021_inflationadjusted_dollars,
+    
+    poverty_rate = poverty_status_in_the_past_12_months_by_sex_by_age_total_income_in_the_past_12_months_below_poverty_level/poverty_status_in_the_past_12_months_by_sex_by_age_total,
+
+    # sum all columns about disability
+    disability = rowSums(
+      across(starts_with("sex_by_age_by_disability"),
+             ~ as.numeric(.x)),           # ensure numeric
+      na.rm = TRUE),
+    # (optional) per-capita / per-100k versions
+    disability_rate      = disability / total_population_total,
+    disability_per100k   = disability_rate * 1e5,
+    
+    # sum all columns about noinsurance
+    noinsurance = rowSums(
+      across(starts_with("types_of_health_insurance_coverage"),
+             ~ replace_na(as.numeric(.x), 0)),
+      na.rm = TRUE
+    ),
+    # Optional: per-capita or per-100k version
+    noinsurance_rate    = noinsurance / total_population_total,
+    noinsurance_per100k = noinsurance_rate * 1e5)
+
+
+write.csv(df_er_drug_mortality_acs, "Data/ER_DRUG_DEATH_ACS.csv")
+```
+In the CDC mortality dataset, only annual data points are available. To address suppressed death counts, we applied *mice* imputation. However, in the spatiotemporal model only 45 of 88 observations passed due to missing values. Among the remaining 44 observations, 21 were recorded as zero.
+
+## 2. Clean and Standardize Data
+### 2.1 Select Predictors
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+df_select <- df_er_drug_mortality_acs%>%
+  select(
+    County,
+    year,
+    pop_CDC,
+    # Deaths
+    Deaths,
+    # ER visit
+    ER_annual_percapita,
+    # Drugs
+    OXYCODONE_annual_percapita,	HYDROCODONE_annual_percapita,	BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
+
+    # ACS
+    unemployee_rate,	gini_index,	poverty_rate,	disability_rate, noinsurance_rate
+    )
+
+```
+
+### 2.2 Data Standardization
+```{r}
+scale_vars <-  c(
+    # Deaths
+    "Deaths",
+    # ER visit
+    "ER_annual_percapita",
+    # Drugs
+    "OXYCODONE_annual_percapita",	"HYDROCODONE_annual_percapita",	"BUPRENORPHINE_annual_percapita", "METHADONE_annual_percapita",
+
+    # ACS
+    "unemployee_rate",	"gini_index",	"poverty_rate",	"disability_rate", "noinsurance_rate"
+    )
+
+df_select_z <- df_select %>%
+  mutate(Deaths_rate= Deaths / pop_CDC)%>%
+  mutate(across(all_of(scale_vars), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
+
+
+# df_select_z_cor <- df_select_z %>%
+#   select(-c("County","year","pop_CDC"))%>%
+#   select(-all_of(scale_vars)) 
+```
+
+## 3. [new] Imputation of Death
+
+### 3.1 [new]EM Imputation of Death
+
+#### 3.2.1 Initial Model without Spatiotemporal
+```{r}
+df_em <- df_select_z %>%
+  mutate(
+    suppressed = is.na(Deaths)  # tweak if you have an explicit flag
+  )%>%
+    mutate(time_index = match(year, sort(unique(year))),
+         log_pop    = log(pop_CDC))
+
+
+# Fixed effects used in both E/M steps:
+form_fixed <- Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
+  HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +
+  METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z +
+  poverty_rate_z + disability_rate_z + noinsurance_rate_z
+
+# form_fixed <- Deaths ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
+#   HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +
+#   METHADONE_annual_percapita_z
+
+
+# Keep only rows you can model (no NA in y, coords, offset, or predictors)
+data_fit <- df_em %>%
+  filter(!is.na(Deaths))
+
+
+# Fit
+fit_init <- sdmTMB(
+  formula = form_fixed,
+  data    = data_fit,
+  #mesh    = mesh_fit,
+  family  = nbinom1(link = "log"),
+  spatial = "off",
+  spatiotemporal = "off",
+  offset  = data_fit$log_pop,
+  control = sdmTMBcontrol(newton_loops = 1)
+)
+summary(fit_init)
+# Predict μ on ALL rows (including suppressed) using fixed+spatial init
+p_init <- predict(fit_init, newdata = df_em, re_form = NA)  # include spatial RF from init
+mu_hat <- exp(p_init$est)
+
+phi <- exp(fit_init$parlist$ln_phi)
+
+#stopifnot(is.finite(phi))
+
+```
+In EM method, we used basic model without spatial and spatiotemperol. We have tried full model, but it cannot converge, due to the limited sample size.
+
+
+#### 3.2.2 Deterministic EM
+
+Set the lower and upper bound
+```{r}
+max_iter <- 20
+df_em$Deaths_em <- df_em$Deaths          # create once
+tol    <- 1e-3
+ll_old <- -Inf
+
+
+for (iter in 1:max_iter) {
+
+  # --- E-step: impute suppressed cells using current mean ---
+  idx <- df_em$suppressed
+  if (any(idx)) {
+    #df_em$Deaths_imp[idx] <- round(mu_hat[idx])  # simple expected fill
+    #df_em$Deaths_em[idx] <- pmax(1, round(mu_hat[idx]))
+    df_em$Deaths_em[idx] <- pmin(9, pmax(1, round(mu_hat[idx])))
+
+  }
+
+  # --- M-step: refit model with updated data ---
+  df_mod <- df_em
+  df_mod$Deaths <- df_mod$Deaths_em
+
+  fit_full <- sdmTMB(
+    formula = form_fixed,
+    data    = df_mod,
+    family  = nbinom1(link = "log"),
+    spatial = "off",
+    spatiotemporal = "off",
+    offset  = df_mod$log_pop,
+    control = sdmTMBcontrol(newton_loops = 1)
+  )
+
+  # --- update parameters ---
+  mu_new <- exp(predict(fit_full)$est)
+  phi_new <- fit_full$family$phi
+  ll_new <- as.numeric(logLik(fit_full))
+
+  # --- check convergence ---
+  if (abs(ll_new - ll_old) < tol) {
+    message(sprintf("EM converged at iter %d (ΔLL=%.4f)", iter, ll_new - ll_old))
+    break
+  }
+
+  # --- prepare next iteration ---
+  mu_hat <- mu_new
+  phi <- phi_new
+  ll_old <- ll_new
+}
+
+# final imputed data
+df_final <- df_em
+df_final$Deaths_em
+
+```
+EM converged at iter 10 (ΔLL=0.0000)
+
+### 3.2 [new]Fixed Imputation of Death
+
+```{r}
+#Impute missing Deaths with 5
+df_imputated <- df_final %>%
+  mutate(Deaths_5 = ifelse(is.na(Deaths), 5, Deaths),
+         Deaths_1 = ifelse(is.na(Deaths), 1, Deaths),
+         Deaths_9 = ifelse(is.na(Deaths), 9, Deaths)
+         )
+
+# No imputation
+# mortality_filted_imputated <- mortality_filted
+
+```
+
+```{r}
+df_imputated%>%
+  select(Deaths,Deaths_1,Deaths_5,Deaths_9,Deaths_em)
+```
+
+Imputing all suppressed deaths as a fixed value (5 for 1–9) can easily dampen or distort the spatial–temporal signal.
+
+Why this can wash out spatiotemporal effects
+
+Attenuation of variance: Replacing a whole range (1–9) with a single number shrinks true variability across counties/years. Less variance ⇒ weaker evidence for spatial or temporal structure.
+
+Systematic bias: Suppression is not random (it occurs at low counts). Mid-point imputation pulls low-count areas toward the same value, making neighboring differences look smaller and weakening spatial gradients.
+
+Few years (2016–2019): With only 4 time points, any variance compression makes AR(1)/IID effects even harder to estimate.
+
+Per-capita scaling: If denominators vary a lot, a flat imputation in counts translates into uneven bias in rates, further masking structure.
+
+
+What to do (quick, practical sensitivity checks)
+
+1.Bracketing analysis (deterministic):
+
+Refit with all suppressed set to 1 (lower bound) and to 9 (upper bound).
+
+Compare AIC, σ_ST, and (if AR1) ρ across the three datasets (1, 5, 9). If σ_ST/ρ jump under 1 or 9, your ST result is sensitive to the imputation.
+
+2.Multiple imputation (simple, nonparametric):
+
+For each suppressed cell, draw a uniform integer 1–9; do this M times, fit the model to each, and pool σ_ST (and ρ).
+
+3.Model-based imputation (better):
+
+Fit a preliminary NB1 model without ST, predict μ̂, then for suppressed cells draw y ~ Truncated-NB(μ̂, θ; 1..9). Repeat M times and refit the full ST model. This respects your outcome distribution.
+
+4.Interval-likelihood (best, Bayesian or custom):
+
+Treat suppressed values as interval-censored counts (P(1≤Y≤9)). A Bayesian Poisson/NB BYM2/INLA model can incorporate this directly; in sdmTMB, you’d need custom likelihood.
+
+
+
+## 4. [Updated] Correlation of Predictors
+
+### 4.1 Select Predictors
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+
+
+df_cor <- df_imputated%>%
+  select(
+    County,
+    year,
+    pop_CDC,
+    # Deaths
+    Deaths,
+    Deaths_1,
+    Deaths_5,
+    Deaths_9,
+    Deaths_em,
+    # ER visit
+    ER_annual_percapita,
+    # Drugs
+    OXYCODONE_annual_percapita,	HYDROCODONE_annual_percapita,	BUPRENORPHINE_annual_percapita, METHADONE_annual_percapita,
+
+    # ACS
+    unemployee_rate,	gini_index,	poverty_rate,	disability_rate, noinsurance_rate
+    )
+
+```
+
+### 4.2 Data Standardization
+```{r}
+
+#Choose Death from Deaths, Deaths_rate, Deaths_1, Death_5, Death_9, Death_em
+# Death_select <- "Deaths_em"
+Death_select <- c("Deaths","Deaths_1", "Deaths_5", "Deaths_9","Deaths_em")
+
+scale_vars <-  c(
+    # Deaths
+#######################################################  
+    
+    #"Deaths"
+    Death_select,
+#######################################################    
+    # ER visit
+    "ER_annual_percapita",
+    # Drugs
+    "OXYCODONE_annual_percapita",	"HYDROCODONE_annual_percapita",	"BUPRENORPHINE_annual_percapita", "METHADONE_annual_percapita",
+
+    # ACS
+    "unemployee_rate",	"gini_index",	"poverty_rate",	"disability_rate", "noinsurance_rate"
+    )
+
+df_cor_rate <- df_cor %>%
+  mutate(Deaths_rate = Deaths / pop_CDC)%>%
+  mutate(Deaths_1_rate = Deaths_1 / pop_CDC)%>% 
+  mutate(Deaths_5_rate = Deaths_5 / pop_CDC)%>%  
+  mutate(Deaths_9_rate = Deaths_9 / pop_CDC)%>%  
+  mutate(Deaths_em_rate = Deaths_em / pop_CDC)%>%  
+  mutate(across(all_of(scale_vars), ~ as.numeric(scale(.x)), .names = "{.col}_z"))
+
+
+df_cor_rate_only_cor <- df_cor_rate %>%
+  select(-c("County","year","pop_CDC"))%>%
+  select(-all_of(scale_vars)) 
+```
+
+
+```{r}
+p_heat <- ggcorr(
+  df_cor_rate_only_cor ,
+  method = c("pairwise.complete.obs", "pearson"),
+  label = TRUE, label_size = 3, hjust = 0.9, layout.exp = 1
+) + theme_minimal(base_size = 10)
+print(p_heat)
+
+```
+
+
+```{r , message=FALSE, warning=FALSE}
+p_pairs <- ggpairs(
+  df_cor_rate,
+  upper = list(continuous = wrap("cor", use = "pairwise.complete.obs", size = 3)),
+  lower = list(continuous = wrap("points", alpha = 0.4, size = 0.7)),
+  diag  = list(continuous = wrap("densityDiag", alpha = 0.6))
+) +
+  theme(
+    axis.text  = element_text(size = 7),
+    strip.text = element_text(size = 8)
+  )
+
+print(p_pairs)
+```
+### 4.3 ER Visit and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_cor_rate, aes(ER_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "ER visits", y = "Deaths")
+
+```
+### 4.4 Drugs and Death
+
+#### 4.4.1 Oxycodone and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_cor_rate, aes(OXYCODONE_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "OXYCODONE consumption", y = "Deaths")
+
+```
+#### 4.4.2 Hydrocodone Visit and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_cor_rate, aes(HYDROCODONE_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "HYDROCODONE consumption", y = "Deaths")
+```
+#### 4.4.3 Buprenorphine and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_cor_rate, aes(BUPRENORPHINE_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "BUPRENORPHINE consumption", y = "Deaths")
+```
+#### 4.4.4 Methadone and Death
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_cor_rate, aes(METHADONE_annual_percapita_z, Deaths)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "METHADONE consumption", y = "Deaths")
+```
+
+### 4.5 Gini Index and Deaths
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_cor_rate, aes(gini_index_z, Deaths_em)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Gini Index", y = "Deaths")
+```
+### 4.7 Disability and Deaths
+```{r fig.width=10, fig.height=8, message=FALSE, warning=FALSE}
+ggplot(df_cor_rate, aes(disability_rate_z, Deaths_em)) +
+  geom_point(aes(color = County)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Disability", y = "Deaths")
+```
+
+
+## 5. [Updated] Spatiotemporal Model
+
+### 5.1 County geometry & coordinates
+```{r}
+# AL counties in UTM 16N (meters), then convert to km numeric coords
+counties_sf <- tigris::counties(state = "AL", cb = TRUE, year = 2023) |>
+  st_transform(26916) |>
+  mutate(County = toupper(NAME))
+
+coords_m  <- st_coordinates(st_centroid(st_geometry(counties_sf)))
+county_xy <- counties_sf |>
+  st_drop_geometry() |>
+  transmute(
+    County,
+    X = coords_m[, "X"] / 1000,  # km
+    Y = coords_m[, "Y"] / 1000
+  )
+
+# Merge coords into model frame
+df <- df_cor_rate |>
+  left_join(county_xy, by = "County") |>
+  filter(is.finite(X), is.finite(Y), is.finite(pop_CDC))%>%
+  mutate(time_index = match(year, sort(unique(year))),
+         log_pop    = log(pop_CDC))
+```
+
+#### 5.1.1 Mesh
+```{r}
+### Mesh (built on the data actually modeled)
+# Cutoff ~ 10% of X-range in km (tune if too coarse/fine)
+mesh <- make_mesh(
+  df,
+  xy_cols = c("X","Y"),
+  cutoff = diff(range(df$X, na.rm = TRUE)) / 10
+)
+
+```
+
+### [new] 5.2 Create Formula
+
+```{r}
+
+form <- as.formula(Deaths_em ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z +
+  HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +
+  METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z +
+  poverty_rate_z + disability_rate_z + noinsurance_rate_z)
+form
+```
+
+### [new] 5.3 Model Comparison and Curvature Testing (For EM)
+
+```{r}
+# ---------- helper: fit with warning capture ----------
+fit_with_warnings <- function(expr) {
+  warns <- character(0)
+  res <- withCallingHandlers(
+    try(expr, silent = TRUE),
+    warning = function(w) {
+      warns <<- c(warns, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(result = res, warnings = warns)
+}
+
+# ---------- grids ----------
+families <- list(
+  NB1 = nbinom1(link = "log"),
+  NB2 = nbinom2(link = "log"),
+  Poisson = poisson(link = "log")
+)
+spatial_opts <- c("off","on")
+st_opts      <- c("off","iid","ar1")
+
+fits <- list()
+rows <- list()
+i <- 1
+
+for (fam_name in names(families)) {
+  fam <- families[[fam_name]]
+  for (sp in spatial_opts) {
+    for (st in st_opts) {
+
+      time_arg <- if (st == "off") NULL else "time_index"
+      model_name <- sprintf("%s_sp%s_%s", fam_name, toupper(sp), toupper(st))
+      cat("Fitting:", model_name, "\n")
+
+      res <- fit_with_warnings(
+        sdmTMB(
+          formula = form,
+          data = df,
+          mesh = mesh,
+          family = fam,
+          spatial = sp,
+          spatiotemporal = st,
+          time = time_arg,
+          offset = df$log_pop,
+          control = sdmTMBcontrol(newton_loops = 3)
+        )
+      )
+
+      if (!inherits(res$result, "try-error")) {
+        fit_i <- res$result
+        fits[[model_name]] <- fit_i
+
+        # --- diagnostics ---
+        pd <- tryCatch(isTRUE(fit_i$sd_report$pdHess), error = function(e) NA)
+        grad_max <- tryCatch(max(abs(fit_i$sd_report$gradient.fixed), na.rm = TRUE), error = function(e) NA_real_)
+        warn_txt <- paste(unique(res$warnings), collapse = " | ")
+        warn_hessian <- grepl("Hessian", warn_txt, ignore.case = TRUE)
+        warn_nan     <- grepl("NaN", warn_txt, ignore.case = TRUE)
+
+        rows[[i]] <- tibble(
+          model = model_name,
+          family = fam_name,
+          spatial = sp,
+          spatiotemporal = st,
+          AIC = AIC(fit_i),
+          logLik = as.numeric(logLik(fit_i)),
+          npar = attr(logLik(fit_i), "df"),
+          # --- Hessian & convergence flags to record ---
+          hessian_pd = pd,                    # TRUE/FALSE/NA
+          grad_max = grad_max,                # size of gradient
+          converged_strict = isTRUE(pd) && is.finite(grad_max) && grad_max < 1e-3,
+          n_warnings = length(res$warnings),
+          warn_hessian = warn_hessian,
+          warn_nan = warn_nan,
+          first_warning = if (length(res$warnings)) res$warnings[[1]] else NA_character_
+        )
+      } else {
+        rows[[i]] <- tibble(
+          model = model_name,
+          family = fam_name,
+          spatial = sp,
+          spatiotemporal = st,
+          AIC = NA_real_, logLik = NA_real_, npar = NA_integer_,
+          hessian_pd = NA, grad_max = NA_real_, converged_strict = FALSE,
+          n_warnings = length(res$warnings),
+          warn_hessian = grepl("Hessian", paste(res$warnings, collapse=" | "), ignore.case = TRUE),
+          warn_nan = grepl("NaN", paste(res$warnings, collapse=" | "), ignore.case = TRUE),
+          first_warning = if (length(res$warnings)) res$warnings[[1]] else NA_character_
+        )
+      }
+      i <- i + 1
+    }
+  }
+}
+
+aic_table <- bind_rows(rows) %>%
+  arrange(AIC) %>%
+  mutate(DeltaAIC = AIC - min(AIC, na.rm = TRUE))
+
+print(aic_table, n = nrow(aic_table))
+
+
+```
+
+Only Three models do not have Hessian warning.
+
+Poisson_spON_OFF	Poisson	on	off
+Poisson_spON_IID	Poisson	on	iid
+Poisson_spON_AR1	Poisson	on	ar1
+
+
+
+```{r}
+readr::write_csv(aic_table, "aic_table_with_hessian.csv")
+```
+
+### [new] 5.3 Comparison for all
+```{r}
+# # ---------- helper: fit with warning capture ----------
+# fit_with_warnings <- function(expr) {
+#   warns <- character(0)
+#   res <- withCallingHandlers(
+#     try(expr, silent = TRUE),
+#     warning = function(w) {
+#       warns <<- c(warns, conditionMessage(w))
+#       invokeRestart("muffleWarning")
+#     }
+#   )
+#   list(result = res, warnings = warns)
+# }
+# 
+# # ---------- grids (same as yours) ----------
+# families <- list(
+#   NB1 = nbinom1(link = "log"),
+#   NB2 = nbinom2(link = "log"),
+#   Poisson = poisson(link = "log")
+# )
+# spatial_opts <- c("off","on")
+# st_opts      <- c("off","iid","ar1")
+# 
+# # ---------- function to run grid for a given response ----------
+# run_grid_for_response <- function(resp_col, df, mesh, offset_col = "log_pop") {
+#   stopifnot(resp_col %in% names(df))
+# 
+#   # reuse your RHS (change these if you change predictors)
+#   rhs <- c("ER_annual_percapita_z","OXYCODONE_annual_percapita_z",
+#            "HYDROCODONE_annual_percapita_z","BUPRENORPHINE_annual_percapita_z",
+#            "METHADONE_annual_percapita_z","unemployee_rate_z","gini_index_z",
+#            "poverty_rate_z","disability_rate_z","noinsurance_rate_z")
+# 
+#   form <- reformulate(rhs, response = resp_col)
+# 
+#   fits <- list()
+#   rows <- list()
+#   i <- 1
+# 
+#   for (fam_name in names(families)) {
+#     fam <- families[[fam_name]]
+#     for (sp in spatial_opts) {
+#       for (st in st_opts) {
+#         time_arg <- if (st == "off") NULL else "time_index"
+#         model_name <- sprintf("%s_sp%s_%s", fam_name, toupper(sp), toupper(st))
+#         cat(sprintf("Fitting: %s | response=%s\n", model_name, resp_col))
+# 
+#         res <- fit_with_warnings(
+#           sdmTMB(
+#             formula = form,
+#             data = df,
+#             mesh = mesh,
+#             family = fam,
+#             spatial = sp,
+#             spatiotemporal = st,
+#             time = time_arg,
+#             offset = df[[offset_col]],
+#             control = sdmTMBcontrol(newton_loops = 3)
+#           )
+#         )
+# 
+#         if (!inherits(res$result, "try-error")) {
+#           fit_i <- res$result
+#           fits[[model_name]] <- fit_i
+# 
+#           pd <- tryCatch(isTRUE(fit_i$sd_report$pdHess), error = function(e) NA)
+#           grad_max <- tryCatch(max(abs(fit_i$sd_report$gradient.fixed), na.rm = TRUE),
+#                                error = function(e) NA_real_)
+#           warn_txt <- paste(unique(res$warnings), collapse = " | ")
+#           warn_hessian <- grepl("Hessian", warn_txt, ignore.case = TRUE)
+#           warn_nan     <- grepl("NaN", warn_txt, ignore.case = TRUE)
+# 
+#           rows[[i]] <- tibble(
+#             response = resp_col,
+#             model = model_name,
+#             family = fam_name,
+#             spatial = sp,
+#             spatiotemporal = st,
+#             n = nrow(df),
+#             n_nonmiss = sum(!is.na(df[[resp_col]])),
+#             prop_zero = mean(df[[resp_col]] == 0, na.rm = TRUE),
+#             AIC = AIC(fit_i),
+#             logLik = as.numeric(logLik(fit_i)),
+#             npar = attr(logLik(fit_i), "df"),
+#             hessian_pd = pd,
+#             grad_max = grad_max,
+#             converged_strict = isTRUE(pd) && is.finite(grad_max) && grad_max < 1e-3,
+#             n_warnings = length(res$warnings),
+#             warn_hessian = warn_hessian,
+#             warn_nan = warn_nan,
+#             first_warning = if (length(res$warnings)) res$warnings[[1]] else NA_character_
+#           )
+#         } else {
+#           rows[[i]] <- tibble(
+#             response = resp_col,
+#             model = model_name,
+#             family = fam_name,
+#             spatial = sp,
+#             spatiotemporal = st,
+#             n = nrow(df),
+#             n_nonmiss = sum(!is.na(df[[resp_col]])),
+#             prop_zero = mean(df[[resp_col]] == 0, na.rm = TRUE),
+#             AIC = NA_real_, logLik = NA_real_, npar = NA_integer_,
+#             hessian_pd = NA, grad_max = NA_real_, converged_strict = FALSE,
+#             n_warnings = length(res$warnings),
+#             warn_hessian = grepl("Hessian", paste(res$warnings, collapse=" | "), ignore.case = TRUE),
+#             warn_nan = grepl("NaN", paste(res$warnings, collapse=" | "), ignore.case = TRUE),
+#             first_warning = if (length(res$warnings)) res$warnings[[1]] else NA_character_
+#           )
+#         }
+#         i <- i + 1
+#       }
+#     }
+#   }
+# 
+#   out <- bind_rows(rows) %>%
+#     arrange(AIC) %>%
+#     mutate(DeltaAIC = AIC - min(AIC, na.rm = TRUE))
+#   return(out)
+# }
+# 
+# # ---------- run for all responses and combine ----------
+# responses <- c("Deaths_em", "Deaths_1", "Deaths_5", "Deaths_9")  # adjust names if needed
+# 
+# tables <- lapply(responses, function(rsp) run_grid_for_response(rsp, df, mesh))
+# aic_table_all <- bind_rows(tables) %>%
+#   group_by(response) %>%
+#   arrange(AIC, .by_group = TRUE) %>%
+#   mutate(DeltaAIC = AIC - min(AIC, na.rm = TRUE)) %>%
+#   ungroup()
+# 
+# print(aic_table_all, n = nrow(aic_table_all))
+
+
+```
+
+```{r}
+# write.csv(aic_table_all, "model_grid_comparison_all_responses.csv", row.names = FALSE)
+
+```
+
+
+### [new] 5.4 Try the best model
+```{r}
+# Find the row for the combo
+idx <- with(aic_table, which(family == "Poisson" & spatial == "on" & spatiotemporal == "iid"))
+
+stopifnot(length(idx) == 1)          # ensure it exists uniquely
+fit <- fits[[idx]]      # create the named object you expected
+
+
+summary(fit)
+
+```
+
+```{r}
+# sanity(fit)
+```
+
+
+```{r}
+# 1) Observed response (numeric vector)
+y_obs <- df$Deaths_em
+
+# 2) Fitted expected counts on response scale (numeric vector, same length as y_obs)
+y_hat <- as.numeric(predict(fit, type = "response")$est)
+
+# 3) Simulate from the fitted model (nsim columns)
+nsim <- 500
+sim_mat <- simulate(fit, nsim = nsim)  # returns a list or matrix depending on version
+# coerce to matrix with rows = observations, cols = sims
+if (is.list(sim_mat)) sim_mat <- do.call(cbind, sim_mat)
+sim_mat <- apply(sim_mat, 2, as.numeric)
+
+# 4) Build DHARMa object
+res <- createDHARMa(
+  simulatedResponse          = sim_mat,
+  observedResponse           = as.numeric(y_obs),
+  fittedPredictedResponse    = y_hat,
+  integerResponse            = TRUE
+)
+
+plot(res)                 # standard DHARMa diagnostics
+testDispersion(res)       # over/under dispersion check
+testZeroInflation(res)    # zero inflation check
+testTemporalAutocorrelation(res, time = df$time_arg)  # optional, if you have time index
+
+
+```
+
+
+### ![new]5.4 Curvature Diagnostics.
+```{r}
+drug_terms <- grep(
+  "OXYCODONE_annual_percapita_z|HYDROCODONE_annual_percapita_z|BUPRENORPHINE_annual_percapita_z|METHADONE_annual_percapita_z",
+  names(fit$sd_report$par.fixed),
+  value = TRUE
+)
+
+
+demo_terms <- grep("unemploy|gini|poverty|disability|noinsurance", names(fit$sd_report$par.fixed), value = TRUE)
+
+
+vcov_mat <- fit$sd_report$cov.fixed
+
+
+
+# define the covariance / Hessian
+vcov_mat <- fit$sd_report$cov.fixed
+
+# identify variable positions by name pattern
+drug_idx <- grepl("OXYCODONE|HYDROCODONE|BUPRENORPHINE|METHADONE", Xnames, ignore.case = TRUE)
+demo_idx <- grepl("unemploy|gini|poverty|disabil|noinsurance", Xnames, ignore.case = TRUE)
+
+# extract the relevant sub-matrices
+H_drug <- vcov_mat[drug_idx, drug_idx, drop = FALSE]
+H_demo <- vcov_mat[demo_idx, demo_idx, drop = FALSE]
+
+# curvature / conditioning tests
+eig_drug <- eigen(H_drug, symmetric = TRUE)$values
+eig_demo <- eigen(H_demo, symmetric = TRUE)$values
+eig_drug
+eig_demo
+
+```
+
+```{r}
+# Compute condition numbers for text output
+cond_drug <- max(eig_drug) / min(eig_drug)
+cond_demo <- max(eig_demo) / min(eig_demo)
+cat("Condition number (Drug block):", round(cond_drug, 2), "\n")
+cat("Condition number (Demographic block):", round(cond_demo, 2), "\n")
+```
+Condition number	Level	Interpretation
+< 10	Low	Predictors are well-conditioned
+10–30	Moderate	Some collinearity, but manageable
+> 30	High	Multicollinearity could inflate SEs and destabilize estimates
+> 100	Severe	Results likely unreliable; recheck variable scaling or redundancy
+
+The condition number for the drug block was 20.20, and for the demographic block 25.44, both within the range typically interpreted as indicating moderate collinearity (values < 30 are generally acceptable). These results suggest that while some interdependence exists among predictors—particularly within the demographic variables such as poverty rate, unemployment rate, and disability rate—the degree of multicollinearity is not severe and unlikely to compromise the stability or interpretability of the model estimates.
+
+
+#### Visulization
+```{r}
+curv_df <- data.frame(
+  Eigenvalue = c(eig_drug, eig_demo),
+  Index = c(seq_along(eig_drug), seq_along(eig_demo)),
+  Block = rep(c("Drug predictors", "Demographic predictors"),
+              times = c(length(eig_drug), length(eig_demo)))
+)
+
+ggplot(curv_df, aes(x = Index, y = Eigenvalue, color = Block)) +
+  geom_point(size = 3) +
+  geom_line(linewidth = 0.8) +
+  scale_y_log10() +
+  scale_x_continuous(breaks = 1:max(curv_df$Index)) +
+  labs(
+    title = "Eigenvalue Spectrum (Curvature Test)",
+    subtitle = "Ordered eigenvalues of fixed-effect covariance matrix (log scale)",
+    x = "Eigenvalue Index (λ1 … λn)",
+    y = "Eigenvalue (log scale)",
+    color = "Block"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "top",
+    panel.grid.minor = element_blank()
+  )
+
+
+```
+Here, both spectra decline smoothly without collapsing toward zero, suggesting that parameters are distinguishable and the model is numerically stable.
+The Demographic block (red) shows slightly smaller eigenvalues overall and a steeper drop-off than the Drug block, implying moderate multicollinearity among demographic predictors (e.g., poverty, unemployment, disability), whereas the Drug block exhibits mild correlation but better conditioning.
+In practical terms, both groups remain within an acceptable range (condition numbers ≈20–25), meaning the model’s fixed-effect estimates are reliable and not severely inflated by multicollinearity.
+
+#### overall curvature
+```{r}
+# Extract full covariance matrix from fit
+V_all <- fit$sd_report$cov.fixed  # same as vcov(fit) if available
+
+# Compute eigenvalues of the full matrix
+eig_all <- eigen(V_all, symmetric = TRUE)$values
+
+# Report min/max and condition number
+cat("Global curvature check:\n")
+cat("Min eigenvalue:", min(eig_all), "\n")
+cat("Max eigenvalue:", max(eig_all), "\n")
+cat("Condition number:", max(eig_all) / min(eig_all), "\n")
+
+# Optional visualization (scree plot)
+df_all <- data.frame(Index = seq_along(eig_all), Eigenvalue = eig_all)
+
+ggplot(df_all, aes(x = Index, y = Eigenvalue)) +
+  geom_point(size = 2) +
+  geom_line() +
+  scale_y_log10() +
+  labs(
+    title = "Global Eigenvalue Spectrum of Fixed-Effect Covariance",
+    subtitle = "Curvature across all predictors combined",
+    x = "Eigenvalue Index (λ₁ … λₙ)",
+    y = "Eigenvalue (log scale)"
+  ) +
+  theme_minimal(base_size = 13)
+
+```
+Global Curvature Diagnostics.
+The eigenvalue spectrum of the fixed-effect covariance matrix revealed a smooth, monotonic decay spanning approximately three orders of magnitude (Figure X).
+All eigenvalues were positive, indicating a convex log-likelihood surface and stable optimization.
+The condition number of the full Hessian (≈ 10²–10³) was well within acceptable limits, confirming that all predictors were jointly identifiable and that the estimation surface exhibited no numerical instability.
+Together with blockwise curvature results, this analysis supports the reliability and well-conditioning of the final NB2 model.
+
+
+### [new] 5.6 Hurdle [Not work]
+```{r}
+# fit_delta <- sdmTMB(
+#   Deaths_em ~ ER_annual_percapita_z + OXYCODONE_annual_percapita_z + 
+#     HYDROCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + 
+#     METHADONE_annual_percapita_z + unemployee_rate_z + gini_index_z + 
+#     poverty_rate_z + disability_rate_z + noinsurance_rate_z,
+#   data = df,
+#   mesh = mesh,
+#   #family = delta_gamma(link1 = "logit", link2 = "log"),
+#   family = nbinom1(link = "log"),
+#   spatial = "on",
+#   spatiotemporal = "iid",       # or "ar1" / "off"
+#   zi = ~ 1,  
+#   time = "time_index",
+#   offset = df$log_pop,          # optional: applies to the positive part
+#   control = sdmTMBcontrol(newton_loops = 2)
+# )
+# summary(fit_delta)
+
+```
+### [new]5.7 Two-part Hurdle [Under tuning]
+```{r}
+# Build a 0/1 response
+df$any_death <- as.integer(df$Deaths_em > 0)
+
+# Reuse RHS from your formula
+rhs <- c("ER_annual_percapita_z","OXYCODONE_annual_percapita_z",
+         "HYDROCODONE_annual_percapita_z","BUPRENORPHINE_annual_percapita_z",
+         "METHADONE_annual_percapita_z","unemployee_rate_z","gini_index_z",
+         "poverty_rate_z","disability_rate_z","noinsurance_rate_z")
+
+form_zero <- reformulate(rhs, response = "any_death")
+form_pos  <- reformulate(rhs, response = "Deaths_em")
+
+# 1) Zero part (Bernoulli) — spatial only is usually enough
+fit_zero <- sdmTMB(
+  form_zero, df, mesh,
+  family  = binomial(link = "logit"),
+  #family  =poisson(link = "log"),
+  spatial = "on",
+  spatiotemporal = "iid",
+  time    = "time_index"
+)
+
+# 2) Positive counts (NB1/2) on Deaths_em > 0
+mesh_pos <- make_mesh(df_pos, xy_cols = c("X","Y"),
+  cutoff = diff(range(df$X, na.rm = TRUE)) / 10)
+
+df_pos <- subset(df, Deaths_em > 0)
+
+fit_pos <- sdmTMB(
+  form_pos, df_pos, mesh_pos,
+  family  = nbinom2(link="log"),
+  #family  =poisson(link = "log"),
+  spatial = "on",
+  spatiotemporal = "iid",   # ← no IID/AR1; avoids that variance on the boundary
+  time    = "time_index",
+  offset  = df_pos$log_pop,
+  control = sdmTMBcontrol(newton_loops = 2)
+)
+```
+
+#### 5.7.1 Extract and Interpret Coefficients
+```{r}
+tab_zero <- tidy(fit_zero, effects = "fixed", conf.int = TRUE) %>%
+  mutate(
+    z_value = estimate / std.error,
+    p_value = 2 * (1 - pnorm(abs(z_value))),
+    p_value = case_when(           # easy-read rounding
+      p_value < 0.001 ~ "< .001",
+      TRUE            ~ sprintf("%.3f", round(p_value, 3))
+    )
+  )
+
+tab_pos <- tidy(fit_pos, effects = "fixed", conf.int = TRUE) %>%
+  mutate(
+    z_value = estimate / std.error,
+    p_value = 2 * (1 - pnorm(abs(z_value))),
+    p_value = case_when(
+      p_value < 0.001 ~ "< .001",
+      TRUE            ~ sprintf("%.3f", round(p_value, 3))
+    ),
+    exp_est = exp(estimate),
+    exp_lo  = exp(conf.low),
+    exp_hi  = exp(conf.high)
+  )
+
+
+# Hurdle: Zero Model Part
+tab_zero
+```
+```{r}
+### Hurdle: Positive Model Part
+tab_pos
+```
+
+
+#### 5.7.2 Model Fit
+```{r}
+# --- 1) Figure out which rows are usable for each part ---------------------
+# Zero part needs RHS in form_zero
+mf_zero  <- model.frame(form_zero, data = df)
+keep_zero <- complete.cases(mf_zero)
+
+# Positive part needs RHS in form_pos AND a finite offset
+mf_pos   <- model.frame(form_pos,  data = df)
+keep_pos <- complete.cases(mf_pos) & is.finite(df$log_pop)
+
+# Rows where both parts can be predicted
+keep_both <- keep_zero & keep_pos
+
+# --- 2) Predict each part on the kept rows ---------------------------------
+# Pr(Y>0 | x)
+p_pos <- rep(NA_real_, nrow(df))
+p_pos[keep_zero] <- plogis(
+  predict(fit_zero, type = "link",
+          newdata = df[keep_zero, , drop = FALSE],
+          allow_new_levels = TRUE)$est
+)
+
+# E[Y | Y>0, x]
+mu_pos <- rep(NA_real_, nrow(df))
+mu_pos[keep_pos] <- exp(
+  predict(fit_pos, type = "link",
+          newdata = df[keep_pos, , drop = FALSE],
+          offset  = df$log_pop[keep_pos],
+          allow_new_levels = TRUE)$est
+)
+
+# --- 3) Combine into expected deaths and attach ----------------------------
+E_Y <- rep(NA_real_, nrow(df))
+E_Y[keep_both] <- p_pos[keep_both] * mu_pos[keep_both]
+df$E_Y <- E_Y
+
+# --- 4) Plot observed vs expected on rows with both available --------------
+ok <- is.finite(df$E_Y) & is.finite(df$Deaths_em)
+plot(df$E_Y[ok], df$Deaths_em[ok], xlab = "Expected", ylab = "Observed")
+abline(0, 1, col = "red", lwd = 2)
+
+# Optional quick diagnostics
+cor(df$E_Y[ok], df$Deaths_em[ok])
+hist((df$Deaths_em - df$E_Y)[ok], main = "Raw residuals", xlab = "Obs - Exp")
+
+
+```
+
+
+```{r}
+df$resid <- df$Deaths_em - df$E_Y
+hist(df$resid)
+boxplot(resid ~ time_index, data=df)
+
+```
+
+
+### [To-do] 5.8 Visualize Spatial & Spatiotemporal Effects
+```{r fig.width=10}
+
+
+```
+

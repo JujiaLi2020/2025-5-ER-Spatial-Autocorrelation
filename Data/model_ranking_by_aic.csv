@@ -1,0 +1,74 @@
+"Model_Index","Formula","AIC","Delta_AIC"
+73,"Deaths ~ intervention2017",-52.1710592205727,0
+68,"Deaths ~ METHADONE_annual_percapita_z",-49.0624973268334,3.10856189373922
+71,"Deaths ~ noinsurance_rate_z",-48.8231092930191,3.34794992755358
+66,"Deaths ~ OXYCODONE_annual_percapita_z",-48.4071284218457,3.76393079872697
+65,"Deaths ~ ER_annual_percapita_z",-48.3027780812091,3.86828113936352
+70,"Deaths ~ disability_rate_z",-48.2703151827326,3.90074403784004
+69,"Deaths ~ poverty_rate_z",-48.1800637761821,3.99099544439059
+67,"Deaths ~ BUPRENORPHINE_annual_percapita_z",-46.1570821272014,6.01397709337126
+72,"Deaths ~ rural_factor",-22.6180583838266,29.5530008367461
+6,"Deaths ~ (rural_factor) * intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",-8.07752276999484,44.0935364505778
+1,"Deaths ~ intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-7.91246835849862,44.258590862074
+33,"Deaths ~ intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-7.91246835849862,44.258590862074
+38,"Deaths ~ (rural_factor) + intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",-7.9124683584986,44.2585908620741
+13,"Deaths ~ (OXYCODONE_annual_percapita_z + rural_factor) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-6.27780126946049,45.8932579511122
+2,"Deaths ~ (ER_annual_percapita_z) * intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",-6.18200996863319,45.9890492519395
+10,"Deaths ~ (ER_annual_percapita_z + rural_factor) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-6.05950307158378,46.1115561489889
+3,"Deaths ~ (OXYCODONE_annual_percapita_z) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-6.05517922230884,46.1158799982638
+15,"Deaths ~ (BUPRENORPHINE_annual_percapita_z + rural_factor) *      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-5.91291859886983,46.2581406217028
+35,"Deaths ~ (OXYCODONE_annual_percapita_z) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-5.88639260774741,46.2846666128253
+45,"Deaths ~ (OXYCODONE_annual_percapita_z + rural_factor) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-5.88639260774739,46.2846666128253
+34,"Deaths ~ (ER_annual_percapita_z) + intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",-5.86095058107531,46.3101086394974
+42,"Deaths ~ (ER_annual_percapita_z + rural_factor) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-5.8609505810753,46.3101086394974
+36,"Deaths ~ (BUPRENORPHINE_annual_percapita_z) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-5.6827925918628,46.4882666287099
+47,"Deaths ~ (BUPRENORPHINE_annual_percapita_z + rural_factor) +      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-5.68279259186279,46.4882666287099
+4,"Deaths ~ (BUPRENORPHINE_annual_percapita_z) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-5.29118313382419,46.8798760867485
+7,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z) *      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-4.34644622158599,47.8246129989867
+19,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      rural_factor) * intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-4.21148360195767,47.959575618615
+5,"Deaths ~ (METHADONE_annual_percapita_z) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-4.05422968121543,48.1168295393572
+21,"Deaths ~ (ER_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      rural_factor) * intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-4.03391790683579,48.1371413137369
+48,"Deaths ~ (METHADONE_annual_percapita_z + rural_factor) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-3.9386725419165,48.2323866786562
+37,"Deaths ~ (METHADONE_annual_percapita_z) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-3.93867254191645,48.2323866786562
+16,"Deaths ~ (METHADONE_annual_percapita_z + rural_factor) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-3.92326754102592,48.2477916795468
+24,"Deaths ~ (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      rural_factor) * intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-3.91686910882066,48.254190111752
+39,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z) +      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-3.79619120813432,48.3748680124383
+51,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      rural_factor) + intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-3.79619120813432,48.3748680124383
+40,"Deaths ~ (ER_annual_percapita_z + BUPRENORPHINE_annual_percapita_z) +      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-3.71115330680031,48.4599059137724
+53,"Deaths ~ (ER_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      rural_factor) + intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-3.71115330680005,48.4599059137726
+8,"Deaths ~ (ER_annual_percapita_z + BUPRENORPHINE_annual_percapita_z) *      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-3.6214983857641,48.5495608348086
+56,"Deaths ~ (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      rural_factor) + intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-3.11041796893953,49.0606412516331
+43,"Deaths ~ (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z) +      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-3.11041796893947,49.0606412516332
+11,"Deaths ~ (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z) *      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-2.59736607284612,49.5736931477265
+12,"Deaths ~ (OXYCODONE_annual_percapita_z + METHADONE_annual_percapita_z) *      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-2.53784045900573,49.6332187615669
+28,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      BUPRENORPHINE_annual_percapita_z + rural_factor) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-2.27598864423299,49.8950705763397
+25,"Deaths ~ (OXYCODONE_annual_percapita_z + METHADONE_annual_percapita_z +      rural_factor) * intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-2.25250036546938,49.9185588551033
+44,"Deaths ~ (OXYCODONE_annual_percapita_z + METHADONE_annual_percapita_z) +      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-2.17749186808307,49.9935673524896
+57,"Deaths ~ (OXYCODONE_annual_percapita_z + METHADONE_annual_percapita_z +      rural_factor) + intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-2.17749186808306,49.9935673524896
+9,"Deaths ~ (ER_annual_percapita_z + METHADONE_annual_percapita_z) *      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-2.0661356520241,50.1049235685486
+22,"Deaths ~ (ER_annual_percapita_z + METHADONE_annual_percapita_z +      rural_factor) * intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-1.80001586581599,50.3710433547567
+58,"Deaths ~ (BUPRENORPHINE_annual_percapita_z + METHADONE_annual_percapita_z +      rural_factor) + intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-1.51992960870379,50.6511296118689
+46,"Deaths ~ (BUPRENORPHINE_annual_percapita_z + METHADONE_annual_percapita_z) +      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-1.51992960870377,50.6511296118689
+54,"Deaths ~ (ER_annual_percapita_z + METHADONE_annual_percapita_z +      rural_factor) + intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-1.51675729994223,50.6543019206304
+41,"Deaths ~ (ER_annual_percapita_z + METHADONE_annual_percapita_z) +      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-1.51675729994218,50.6543019206305
+26,"Deaths ~ (BUPRENORPHINE_annual_percapita_z + METHADONE_annual_percapita_z +      rural_factor) * intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",-1.51447531080575,50.6565839097669
+60,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      BUPRENORPHINE_annual_percapita_z + rural_factor) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-1.15493594534614,51.0161232752265
+49,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      BUPRENORPHINE_annual_percapita_z) + intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",-1.1549359453461,51.0161232752266
+17,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      BUPRENORPHINE_annual_percapita_z) * intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",-0.886567051728417,51.2844921688443
+14,"Deaths ~ (BUPRENORPHINE_annual_percapita_z + METHADONE_annual_percapita_z) *      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-0.828477064110388,51.3425821564623
+18,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      METHADONE_annual_percapita_z) * intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",-0.669385317832848,51.5016739027398
+31,"Deaths ~ (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      METHADONE_annual_percapita_z + rural_factor) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-0.436998503067358,51.7340607175053
+29,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      METHADONE_annual_percapita_z + rural_factor) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",-0.13965754062766,52.031401679945
+55,"Deaths ~ (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      METHADONE_annual_percapita_z) + intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",0.17357988220089,52.3446391027736
+63,"Deaths ~ (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      METHADONE_annual_percapita_z + rural_factor) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",0.17357988220115,52.3446391027738
+50,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      METHADONE_annual_percapita_z) + intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",0.234950391745116,52.4060096123178
+61,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      METHADONE_annual_percapita_z + rural_factor) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",0.234950391745233,52.4060096123179
+30,"Deaths ~ (ER_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      METHADONE_annual_percapita_z + rural_factor) * intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",0.282994404049909,52.4540536246226
+23,"Deaths ~ (OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      METHADONE_annual_percapita_z) * intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",0.705868415800964,52.8769276363736
+52,"Deaths ~ (ER_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      METHADONE_annual_percapita_z) + intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",0.786167131529872,52.9572263521025
+62,"Deaths ~ (ER_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      METHADONE_annual_percapita_z + rural_factor) + intervention2017 +      poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",0.786167131529911,52.9572263521026
+20,"Deaths ~ (ER_annual_percapita_z + BUPRENORPHINE_annual_percapita_z +      METHADONE_annual_percapita_z) * intervention2017 + poverty_rate_z +      disability_rate_z + noinsurance_rate_z + rural_factor",1.01832403790562,53.1893832584783
+32,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      BUPRENORPHINE_annual_percapita_z + METHADONE_annual_percapita_z +      rural_factor) * intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",1.22310882666472,53.3941680472374
+59,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      BUPRENORPHINE_annual_percapita_z + METHADONE_annual_percapita_z) +      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",2.40430418401686,54.5753634045895
+64,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      BUPRENORPHINE_annual_percapita_z + METHADONE_annual_percapita_z +      rural_factor) + intervention2017 + poverty_rate_z + disability_rate_z +      noinsurance_rate_z + rural_factor",2.40430418401699,54.5753634045897
+27,"Deaths ~ (ER_annual_percapita_z + OXYCODONE_annual_percapita_z +      BUPRENORPHINE_annual_percapita_z + METHADONE_annual_percapita_z) *      intervention2017 + poverty_rate_z + disability_rate_z + noinsurance_rate_z +      rural_factor",2.47803152082877,54.6490907414014
