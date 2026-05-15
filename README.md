@@ -6,7 +6,7 @@ The main result is
 [Main.Rmd](https://github.com/JujiaLi2020/2025-5-ER-Spatial-Autocorrelation/blob/main/script/Main.Rmd)
 
 Or check the Result PDF directly
-[Opioid, ED Visit, & Mortality.pdf](https://github.com/JujiaLi2020/2025-5-ER-Spatial-Autocorrelation/blob/main/script/Opioid, ED Visit, & Mortality.pdf)
+[opioid_result.pdf](https://github.com/JujiaLi2020/2025-5-ER-Spatial-Autocorrelation/blob/main/script/opioid_result.pdf)
 
 - Generalized Linear Mixed Models (GLMM)
 - Spatiotemporal models via `sdmTMB`
