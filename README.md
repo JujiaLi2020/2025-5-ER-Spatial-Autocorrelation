@@ -2,6 +2,12 @@
 
 This repository provides a full modeling framework for analyzing the relationship between **opioid overdose ER visits**, **opioid overdose deaths**, **drug consumption**, and **socioeconomic factors** using:
 
+The main result is 
+[Main.Rmd](https://github.com/JujiaLi2020/2025-5-ER-Spatial-Autocorrelation/blob/main/script/Main.Rmd)
+
+Or check the html directly
+[Main.nb.html](https://github.com/JujiaLi2020/2025-5-ER-Spatial-Autocorrelation/blob/main/script/Main.nb.html)
+
 - Generalized Linear Mixed Models (GLMM)
 - Spatiotemporal models via `sdmTMB`
 - ER × Drug and ER × SES interaction models
