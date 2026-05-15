@@ -29,7 +29,7 @@ library(patchwork)
 ```
 
 ## 1.2 Merge Datasets
-```{r}
+```{r figure2, echo=FALSE, message=FALSE, warning=FALSE}
 ###############################
 
 #repos <- "/Users/yuihuiyao/Library/CloudStorage/Box-Box/2025-5-ER-Spatial-Autocorrelation"
@@ -378,7 +378,7 @@ write.csv(df, paste0(repos,"/Data/all.csv"))
 
 # 2. Descriptive Statistics
 
-## Table 1 (Part 1). County Characteristics in Northwestern Alabama, 2016–2019
+##  [[[Table 1 (Part 1)]]]. County Characteristics in Northwestern Alabama, 2016–2019
 
 ```{r table1-study-population, results='asis'}
 county_chars <- df %>%
@@ -404,7 +404,7 @@ county_chars
 
 
 
-## Table 1 (Part 2). County Characteristics in Northwestern Alabama, 2016–2019
+## [[[Table 1 (Part 2)]]]. County Characteristics in Northwestern Alabama, 2016–2019
 
 ```{r table2-ed-deaths, results='asis'}
 # Regional totals and by-year summary from df (all.csv)
@@ -440,7 +440,7 @@ write.csv(ed_death_wide, paste0(repos,"/Data/table2.csv"))
 ```
 
 
-## Figure 1. County-Level Emergency Department Visit Rates, 2016–2019s
+## [[[Figure 1]]]. County-Level Emergency Department Visit Rates, 2016–2019s
 ```{r}
 fig1_data <- df_num %>%
   filter(year >= 2016, year <= 2019) %>%
@@ -477,7 +477,7 @@ ggplot(
 ```
 
 
-# 3. Leave-One-Out Cross-Validatio with Truncated Expectation
+# 3. Imputation and Model Comparison Leave-One-Out Cross-Validatio with Truncated Expectation
 
 ### [!!! Please skip 3.0], we use selected model from Yao's Output
 
@@ -1096,7 +1096,7 @@ p_comparison
 
 
 # 4. "Hot Spot" maps
-## 4.1 Figure 2. Spatial Clustering of ED Visits and Methadone Distribution
+## 4.1 [[[Figure 2]]]. Spatial Clustering of ED Visits and Methadone Distribution
 ### This Figure is newly produced in R. The older one in manuscript was created by ArcGIS.
 ```{r}
 # # 1. Run predictions on original data
@@ -1262,156 +1262,9 @@ imputed_df$rural_factor <- as.factor(imputed_df$rural_factor)
 imputed_df$urban <- as.factor(7 - as.numeric(imputed_df$rural_factor))
 ```
 
-
-
-## 5.2 [old]Mediator Model
-```{r}
-
-
-
-form_mediator <- ER_annual ~ rural_factor + 
-                 OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + 
-                 METHADONE_annual_percapita_z + gini_index_z + poverty_rate_z
-
-form_outcome <- Deaths ~ rural_factor * ( ER_annual_percapita_z +
-                gini_index_z + noinsurance_rate_z + time_index)
-
-form_mediator_reversed <- ER_annual ~ urban + 
-                 OXYCODONE_annual_percapita_z + BUPRENORPHINE_annual_percapita_z + 
-                 METHADONE_annual_percapita_z + gini_index_z + poverty_rate_z
-
-
-form_outcome_reversed <- Deaths ~ urban * ( ER_annual_percapita_z +
-                gini_index_z + noinsurance_rate_z + time_index)
-
-
-
-mesh_global <- make_mesh(df_em, xy_cols = c("X", "Y"), n_knots = 10)
-
-form_single_offset <- update(form_single, . ~ . + offset(log_pop))
-
-fit_mediator <- sdmTMB(
-  formula = form_mediator,
-  data    = imputed_df,
-  mesh    = mesh_global,
-  family  = poisson(link = "log"),
-  spatial = "on",
-  offset  = "log_pop",
-  priors  = sdmTMBpriors(
-    matern_s = pc_matern(range_gt = 10, sigma_lt = 2)
-  )
-)
-# summary(fit_mediator)
-
-fit_mediator_urban <- sdmTMB(
-  formula = form_mediator_reversed,
-  data    = imputed_df,
-  mesh    = mesh_global,
-  family  = poisson(link = "log"),
-  spatial = "on",
-  offset  = "log_pop",
-  priors  = sdmTMBpriors(
-    matern_s = pc_matern(range_gt = 10, sigma_lt = 2)
-  )
-)
-
-# summary(fit_mediator_urban)
-```
-## 5.3 [old]Outcome Model 
-
-```{r}
-fit_outcome <- sdmTMB(
-  formula = form_outcome,
-  data    = imputed_df,
-  mesh    = mesh_global,
-  family  = poisson(link = "log"),
-  spatial = "on",
-  offset  = "log_pop",
-  priors  = sdmTMBpriors(
-    matern_s = pc_matern(range_gt = 10, sigma_lt = 2)
-  )
-)
-
-# summary(fit_outcome)
-```
-
-
-## 5.4 [old]Rural Based Outcome Model 
-
-```{r}
-fit_outcome_urban <- sdmTMB(
-  formula = form_outcome_reversed,
-  data    = imputed_df,
-  mesh    = mesh_global,
-  family  = poisson(link = "log"),
-  spatial = "on",
-  offset  = "log_pop",
-  priors  = sdmTMBpriors(
-    matern_s = pc_matern(range_gt = 10, sigma_lt = 2)
-  )
-)
-
-
-# summary(fit_outcome_reversed)
-```
-
-```{r}
-# 1. Extract fixed effects
-tidy_med <- tidy(fit_mediator, effects = "fixed", conf.int = TRUE) %>%
-  mutate(model = "Mediator")
-
-tidy_out <- tidy(fit_outcome, effects = "fixed", conf.int = TRUE) %>%
-  mutate(model = "Outcome")
-
-# 2. Combine, Format, and Pivot
-comparison_table <- bind_rows(tidy_med, tidy_out) %>%
-  # Create the combined string first
-  mutate(
-    est_se = paste0(round(estimate, 3), " (", round(std.error, 3), ")")
-  ) %>%
-  # Select only what we need for the wide format
-  select(term, model, est_se) %>%
-  pivot_wider(
-    names_from = model, 
-    values_from = est_se
-  )
-
-# View the result
-print(comparison_table)
-
-```
-
-```{r}
-# 1. Extract fixed effects
-tidy_med <- tidy(fit_mediator_urban, effects = "fixed", conf.int = TRUE) %>%
-  mutate(model = "Mediator")
-
-tidy_out <- tidy(fit_outcome_urban, effects = "fixed", conf.int = TRUE) %>%
-  mutate(model = "Outcome")
-
-# 2. Combine, Format, and Pivot
-comparison_table <- bind_rows(tidy_med, tidy_out) %>%
-  # Create the combined string first
-  mutate(
-    est_se = paste0(round(estimate, 3), " (", round(std.error, 3), ")")
-  ) %>%
-  # Select only what we need for the wide format
-  select(term, model, est_se) %>%
-  pivot_wider(
-    names_from = model, 
-    values_from = est_se
-  )
-
-# View the result
-print(comparison_table)
-
-```
-
-
-
 ## 5.5 [Final] Mediator
 
-### 5.5.0 OUD Composite
+### 5.5.0 Drugs Composite
 ```{r}
 # Load necessary libraries
 library(corrplot)
@@ -1498,14 +1351,6 @@ form_outcome <- Deaths ~
 
 
 ```{r}
-# 1. Fit models using nbinom2 to account for overdispersion
-# mesh_global <- make_mesh(
-#   data = imputed_df,
-#   xy_cols = c("X", "Y"), 
-#   cutoff = 100 
-# )
-
-
 fit_mediator <- sdmTMB(
   formula = form_mediator,
   data    = imputed_df,
@@ -1535,7 +1380,7 @@ fit_outcome <- sdmTMB(
 
 
 
-### 5.5.1 Comprehensive table comparing all three of your sub-models
+### 5.5.1 [[[Table 3]]]. Medication-Specific Associations from Spatiotemporal Model
 ```{r}
 # 1. Extract the fixed effects for each model
 # Using conf.int = TRUE will also calculate the 95% CIs if you need them later
@@ -1591,7 +1436,7 @@ kable(final_table, align = "l")
 
 # Save the table to your current working directory
 #write.csv(final_table, "moderated_mediation_results.csv", row.names = FALSE)
-write.csv(final_table, "moderated_mediation_results_quadratic.csv", row.names = FALSE)
+#write.csv(final_table, "moderated_mediation_results_quadratic.csv", row.names = FALSE)
 ```
 
 
@@ -1605,96 +1450,6 @@ library(DHARMa)
 sim_res_med <- simulate(fit_mediator, nsim = 500, type = "mle-mvn")
 dharma_residuals(sim_res_med, fit_mediator)
 ```
-
-
-### 5.5.3 Bootstrapping Confidence Intervals for Moderated Mediation
-```{r}
-library(MASS)
-
-# Extract fixed effects (mu) and variance-covariance matrices (Sigma)
-mu_a <- tidy(fit_mediator)$estimate
-V_a  <- vcov(fit_mediator)
-
-mu_b <- tidy(fit_outcome)$estimate
-V_b  <- vcov(fit_outcome)
-
-# Simulate 5,000 draws from the posterior distributions
-set.seed(123)
-sim_a <- mvrnorm(5000, mu = mu_a, Sigma = V_a)
-sim_b <- mvrnorm(5000, mu = mu_b, Sigma = V_b)
-
-# Identify the column index for your coefficients (replace with actual column numbers)
-# a1 = Main effect of Oxycodone
-# a3 = Interaction of Oxycodone * Rurality
-# b1 = Main effect of ER visits
-# b3 = Interaction of ER visits * Rurality
-
-# Calculate the conditional indirect effect (a * b) for Urban (assuming rural_factor = 0)
-# 1. First, check the exact column names of your simulated matrices
-colnames(sim_a)
-colnames(sim_b)
-
-# 2. Extract the specific 1D vectors (5000 items each) for the 'a' paths
-a1 <- sim_a 
-a3 <- sim_a 
-
-# 3. Extract the specific 1D vectors for the 'b' paths
-b1 <- sim_b
-b3 <- sim_b
-
-# 4. Now calculate the conditional indirect effects
-# Since a1, a3, b1, and b3 are now simple vectors, the math will work perfectly
-
-# For the Urban reference level (where rural_factor interaction terms are 0)
-indirect_urban <- a1 * b1
-
-# For the Rural Level 6 (adding the interaction terms for both stages)
-indirect_rural <- (a1 + a3) * (b1 + b3)
-
-# Calculate the Index of Moderated Mediation (the difference between the two)
-index_mod_med <- indirect_rural - indirect_urban
-
-# Generate 95% Confidence Intervals
-quantile(index_mod_med, probs = c(0.025, 0.975))
-
-# For Rural (assuming rural_factor = 1, so the interaction terms are added)
-indirect_rural <- (a1 + a3) * (b1 + b3)
-
-# Calculate the Index of Moderated Mediation
-index_mod_med <- indirect_rural - indirect_urban
-
-# Generate 95% CIs
-quantile(index_mod_med, probs = c(0.025, 0.975))
-
-# Calculate the conditional indirect effect (a * b) for Rural (assuming rural_factor = 1)
-indirect_rural <- (sim_a + sim_a) * 
-                  (sim_b + sim_b)
-
-# Calculate the Index of Moderated Mediation (Difference in indirect effects)
-index_mod_med <- indirect_rural - indirect_urban
-
-# Generate 95% CIs
-quantile(index_mod_med, probs = c(0.025, 0.975))
-```
-
-
-### 5.5.4 Probing the Interactions (Simple Slopes)
-```{r}
-library(ggeffects)
-library(ggplot2)
-
-# Predict the marginal effects of ER visits on Deaths at different levels of Rurality
-slopes_b_path <- ggpredict(fit_outcome, terms = c("ER_annual_percapita_z", "rural_factor"))
-
-# Plot the simple slopes to visualize the moderation
-plot(slopes_b_path) + 
-  labs(
-    title = "Simple Slopes: Effect of ER Visits on Mortality by Rurality",
-    x = "Standardized ER Visits",
-    y = "Predicted Deaths"
-  )
-```
-
 
 
 # 6. Shiny
