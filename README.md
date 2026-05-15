@@ -5,8 +5,8 @@ This repository provides a full modeling framework for analyzing the relationshi
 The main result is 
 [Main.Rmd](https://github.com/JujiaLi2020/2025-5-ER-Spatial-Autocorrelation/blob/main/script/Main.Rmd)
 
-Or check the html directly
-[Main.nb.html](https://github.com/JujiaLi2020/2025-5-ER-Spatial-Autocorrelation/blob/main/script/Main.nb.html)
+Or check the Result PDF directly
+[Opioid, ED Visit, & Mortality.pdf](https://github.com/JujiaLi2020/2025-5-ER-Spatial-Autocorrelation/blob/main/script/Opioid, ED Visit, & Mortality.pdf)
 
 - Generalized Linear Mixed Models (GLMM)
 - Spatiotemporal models via `sdmTMB`
